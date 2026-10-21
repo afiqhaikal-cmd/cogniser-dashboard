@@ -2,8 +2,10 @@
 import runpy
 import streamlit as st
 from cloud_bridge import refresh_cloud
+from streamlit_autorefresh import st_autorefresh
 
 # dashboard.py sets page config; do not call st.set_page_config here.
+st_autorefresh(interval=10000, limit=None, key="cogniser_auto_refresh")
 try:
     refresh_cloud()
 except KeyError as exc:
