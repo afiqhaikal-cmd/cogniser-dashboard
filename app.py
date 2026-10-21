@@ -1,7 +1,33 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-st.set_page_config(page_title='Cogniser | Reviewer Demo',page_icon='🏭',layout='wide')
+import requests
+
+def get_cogniser_events():
+    try:
+        url = st.secrets["SUPABASE_URL"].rstrip("/")
+        key = st.secrets["SUPABASE_SECRET_KEY"]
+
+        response = requests.get(
+            f"{url}/rest/v1/cogniser_events",
+            headers={
+                "apikey": key,
+                "Authorization": f"Bearer {key}",
+            },
+            params={
+                "select": "*",
+                "order": "event_id.desc",
+                "limit": "100",
+            },
+            timeout=15,
+        )
+
+        response.raise_for_status()
+        return response.json(), None
+
+    except Exception as e:
+        return [], str(e)
+    st.set_page_config(page_title='Cogniser | Reviewer Demo',page_icon='🏭',layout='wide')
 STEPS={1:['Temperature','Ear Ring','Necklace','Bracelet','Ring','Nail','Wound','Plaster'],2:['Hair Cover','Face Mask','Protective Clothing','Shoes'],3:['Hand Washing'],4:['Gloves'],5:['Mobile Phone / Metal Detection']}
 ALL=[k for v in STEPS.values() for k in v]
 if 'records' not in st.session_state: st.session_state.records=[]
