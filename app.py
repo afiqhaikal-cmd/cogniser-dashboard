@@ -74,8 +74,36 @@ with tabs[0]:
  st.info('A PPE detection updates component checks. The overall inspection remains PENDING until every mandatory check is recorded.')
  st.dataframe(pd.DataFrame([{'Step':f'Step {step}','Checkpoint':key,'Result':checks.get(key,'PENDING')} for step,keys in STEPS.items() for key in keys]),hide_index=True,use_container_width=True)
 with tabs[1]:
- st.header('Face Recognition · Demo');st.write('Camera 1 identity layer. Select **Face Recognition** above to simulate an identified worker.');st.metric('Current employee',st.session_state.employee or 'No identity');st.caption('Synthetic DEMO-001 is not a real employee.')
-for step,idx in [(1,2),(2,3),(3,4),(4,5),(5,6)]:
+    st.header("Face Recognition")
+
+    st.subheader("Demo Session")
+    st.metric(
+        "Demo Employee",
+        st.session_state.employee or "Not detected"
+    )
+
+    st.subheader("Supabase Face Recognition Events")
+
+    cloud_events, cloud_error = get_cogniser_events()
+
+    if cloud_error:
+        st.error(f"Supabase error: {cloud_error}")
+    else:
+        face_events = [
+            event for event in cloud_events
+            if event.get("event_type") == "face"
+        ]
+
+        if face_events:
+            st.dataframe(
+                pd.DataFrame(face_events)[
+                    ["employee_id", "camera_id", "event_time"]
+                ],
+                hide_index=True,
+                use_container_width=True
+            )
+        else:
+            st.info("No face recognition events found.")
  with tabs[idx]:
   st.header(f'Step {step} · Inspection');st.dataframe(pd.DataFrame([{'Checkpoint':k,'Result':checks.get(k,'PENDING'),'Source':'DEMO' if k in checks else 'Awaiting evidence'} for k in STEPS[step]]),hide_index=True,use_container_width=True)
 with tabs[7]:
