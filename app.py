@@ -98,3 +98,37 @@ with tabs[9]:
  st.metric('Virtual signal',colour)
  st.info({'WHITE':'Ready / Standby','BLUE':'Processing / Awaiting checks','GREEN':'Passed / Authorized (simulation)','RED':'Failed / Unauthorized (simulation)'}[colour])
  st.warning('No physical lamp, speaker, or gate is controlled by this demo.')
+    st.divider()
+st.subheader("Live Supabase Events")
+
+if st.button("Refresh Supabase Data"):
+    st.rerun()
+
+events, error = get_cogniser_events()
+
+if error:
+    st.error(f"Supabase connection error: {error}")
+elif events:
+    df_events = pd.DataFrame(events)
+
+    st.success(f"Connected to Supabase — {len(df_events)} events retrieved")
+
+    preferred_columns = [
+        "event_type",
+        "employee_id",
+        "camera_id",
+        "event_id",
+    ]
+
+    available_columns = [
+        col for col in preferred_columns
+        if col in df_events.columns
+    ]
+
+    st.dataframe(
+        df_events[available_columns],
+        use_container_width=True,
+        hide_index=True,
+    )
+else:
+    st.info("Connected to Supabase, but no events found.")
