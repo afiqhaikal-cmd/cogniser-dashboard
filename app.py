@@ -98,7 +98,7 @@ with tabs[9]:
  st.metric('Virtual signal',colour)
  st.info({'WHITE':'Ready / Standby','BLUE':'Processing / Awaiting checks','GREEN':'Passed / Authorized (simulation)','RED':'Failed / Unauthorized (simulation)'}[colour])
  st.warning('No physical lamp, speaker, or gate is controlled by this demo.')
-    st.divider()
+st.divider()
 st.subheader("Live Supabase Events")
 
 if st.button("Refresh Supabase Data"):
