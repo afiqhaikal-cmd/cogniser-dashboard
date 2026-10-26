@@ -2,10 +2,10 @@ import streamlit as st,pandas as pd,sqlite3
 from core import connect,snapshot,STEPS,LABEL,ORANGE,MANUAL
 import json
 STEP_NAMES=['Temperature + Jewellery / Nail / Wound / Plaster','Hair Cover / Mask / Clothing / Shoes','Hand Washing','Gloves','Mobile Phone / Metal Detection']
-st.set_page_config(page_title='Cogniser | Original Factory Checkpoints',layout='wide',page_icon='🏭')
+st.set_page_config(page_title='FOOD SAFETY MONITORING-ISO22000',layout='wide',page_icon='🏭')
 st.markdown('''<style>.block-container{max-width:1450px;padding-top:1.4rem}.hero{background:linear-gradient(100deg,#092f50,#086b83);color:white;border-radius:18px;padding:26px}.hero h1{color:white;margin:0}.hero p{color:#d5edf4;margin:6px 0 0}.tile{border:1px solid #cbd5e1;border-radius:12px;padding:16px;min-height:145px;background:#f8fafc}.tag{font-size:12px;color:#64748b}.signal{width:110px;height:110px;border-radius:100%;margin:12px auto;border:6px solid white;box-shadow:0 0 24px #9ca3af}</style>''',unsafe_allow_html=True)
-st.markdown('<div class="hero"><h1>COGNISER · ORIGINAL FACTORY INSPECTION v49</h1><p>Face Recognition → Step 1 → Step 2 → Step 3 → Step 4 → Step 5 → Gate Eligibility</p></div>',unsafe_allow_html=True)
-st.caption('LIVE DATA REFRESH 5 SECONDS · LIVE DATA RECEIVER PROTOTYPE · Only explicit confirmed events change results. Hardware control and Cogniser event mapping require commissioning.')
+st.markdown('<div class="hero"><h1>FOOD SAFETY MONITORING-ISO22000</h1><p>Face Recognition → Step 1 → Step 2 → Step 3 → Step 4 → Step 5 → Gate Eligibility</p></div>',unsafe_allow_html=True)
+st.caption('DATA REFRESH · 5 SECONDS | Inspection status is based on recorded and verified events.')
 s=snapshot();a=s['active'];last=s['latest'];current=a or last;state=(a['status'] if a else (last['status'] if last else 'WAITING'));color={'READY':'#ffffff','PASS':'#16a34a','FAIL':'#dc2626','WAITING':'#ffffff','PENDING':'#2563eb','INTERRUPTED':'#64748b'}.get(state,'#64748b')
 def latest_ppe_component_results():
  """Read the latest accepted PPE rectangle for the current face event.
@@ -60,8 +60,8 @@ def virtual_hardware_status():
 @st.fragment(run_every="5s")
 def hardware_simulation():
  status,colour,audio,count=virtual_hardware_status()
- st.subheader('Four-colour status indicator · SIMULATION ONLY')
- st.caption('Meeting 8 October 2026: WHITE=Ready, BLUE=Processing, GREEN=Passed, RED=Failed. No lamp, speaker or edge device is connected.')
+ st.subheader('Status Indicator · Operational Overview')
+ st.caption('WHITE · Ready | BLUE · Processing | GREEN · Passed | RED · Failed. Physical indicator connection pending commissioning.')
  colours={'WHITE':'#ffffff','BLUE':'#2563eb','GREEN':'#16a34a','RED':'#dc2626'}
  labels={'WHITE':'READY / STANDBY','BLUE':'PROCESSING / DETECTING','GREEN':'PASSED / AUTHORIZED','RED':'FAILED / UNAUTHORIZED'}
  cols=st.columns(4)
@@ -73,13 +73,13 @@ def hardware_simulation():
  a.metric('Current virtual signal',colour)
  b.metric('Inspection state',status)
  c.metric('PPE attempts · current face',count)
- st.info('Speaker message preview: '+audio)
- st.warning('Audio preview is text only. Actual speaker playback, network control, watchdog and physical I/O require confirmed hardware and on-site testing.')
+ st.info('Audio status: '+audio)
+ st.caption('External speaker connection: pending commissioning.')
  st.markdown('#### Site layout · agreed 8 October 2026')
  st.markdown('**Server Room (2nd floor):** BMAX B1 Plus Mini PC + Cogniser V1 processing unit')
  st.markdown('**LAN connection:** approximately 30 metres to Front of LAB (4th floor)')
  st.markdown('**Front of LAB:** 2 × Dahua IPC-HFW2441S-S (2.8 mm) CCTV, 1 × edge device (model not selected), 1 × speaker (model not selected), 1 × four-colour status indicator (model not selected)')
- st.caption('Camera 1: Face Recognition · Camera 2: PPE Detection. Edge device model and physical output interface are NOT confirmed.')
+ st.caption('Camera 1 · Face Recognition | Camera 2 · PPE Detection | Edge interface · Pending commissioning')
 
 tabs=st.tabs(['LIVE OVERVIEW','FACE RECOGNITION','STEP 1 · TEMPERATURE + HYGIENE','STEP 2 · PPE','STEP 3 · HAND WASHING','STEP 4 · GLOVES','STEP 5 · METAL DETECTION','AUDIT & REPORT','COGNISER CONNECTION','4-COLOUR INDICATOR + AUDIO'])
 @st.fragment(run_every="5s")
@@ -127,8 +127,8 @@ def live_overview():
   f3.metric('Match score',str(face_data.get('score','—')))
   f4.metric('Session created','YES' if face_data.get('accepted') else 'NO')
   st.caption(f"Received at {face_row['time']} (Asia/Bangkok) · Library: {face_data.get('faceLibName','—')} · {face_row['note']}")
-  st.info('Face matching threshold must be validated with Cogniser. A score of 0.537 alone does not establish a factory-approved match threshold. The thermal field 0.001 is not used as body temperature.')
- else:st.info('Waiting for Cogniser Face Recognition JSON. Run TEST_FACE_SAMPLE.bat.')
+  st.info('Face matching threshold pending validation. Device thermal metadata is not treated as body temperature.')
+ else:st.info('Awaiting Face Recognition event.')
  st.divider()
  st.subheader('Live Cogniser PPE Detection · Camera 2')
  with connect() as c:
@@ -142,9 +142,9 @@ def live_overview():
   st.caption(f"Received at {raw['time']} (Asia/Bangkok) · Task: {data.get('taskName','—')}")
   if rects:
    st.dataframe(pd.DataFrame([{'Object ID':r.get('id'),'Cogniser raw value':r.get('value'),'Employee ID (sequence)':data.get('employee_id') or '—'} for r in rects]),use_container_width=True,hide_index=True)
-  st.info(f'Latest PPE message: {len(rects)} rectangles. Each valid rectangle = ONE attempt, so the supplied four-valid-rectangle sample produces FOUR attempts. Mapping: glove-mask-hat; 1 = worn, 0 = not worn.')
- else:st.info('Waiting for Cogniser PPE JSON. Run TEST_PPE_SAMPLE.bat to display a sample detection.')
- st.caption('Auto-refresh every 5 seconds. No physical gate-open commands are issued.')
+  st.info(f'Latest PPE message: {len(rects)} rectangles. Valid PPE detection entries are counted individually. Device code mapping requires verified configuration.')
+ else:st.info('Awaiting PPE Detection event.')
+ st.caption('Refresh interval: 5 seconds | Access-control output: Not configured')
 
 
 def show_decoded_ppe(data, component=None):
@@ -171,7 +171,7 @@ def show_decoded_ppe(data, component=None):
   cols=st.columns(len(selected))
   for col,(j,name) in zip(cols,selected):
    col.metric(name,'PASS' if valid[-1][j]=='1' else 'FAIL')
-  st.caption('Uses the last valid detection entry, not the worst result across all entries. If rectangles represent different people, this is NOT a verified identity match; validate the Cogniser event order and one-person-at-a-time operation before live gate use.')
+  st.caption('Latest valid detection entry shown. Identity association and event ordering remain subject to device integration verification.')
  else:st.warning('No valid glove-mask-hat values found.')
 
 @st.fragment(run_every="5s")
@@ -181,13 +181,13 @@ def cogniser_checkpoint_live(step):
   face=c.execute("SELECT time,payload,note FROM events WHERE event='cogniser_face_raw' ORDER BY id DESC LIMIT 1").fetchone()
   ppe=c.execute("SELECT time,payload,note FROM events WHERE event='cogniser_ppe_raw' ORDER BY id DESC LIMIT 1").fetchone()
  if step==0:
-  if not face:st.info('No face JSON received yet. Run TEST_FACE_SAMPLE.bat or configure Cogniser LAN push.');return
+  if not face:st.info('No Face Recognition event received.');return
   d=json.loads(face['payload']);x,y,z=st.columns(3)
   x.metric('Employee ID',d.get('employee_id') or '—');y.metric('Camera',d.get('equipmentName') or '—');z.metric('Match score',str(d.get('score','—')))
   st.caption(f"Received: {face['time']} · Library: {d.get('faceLibName')} · Session accepted: {d.get('accepted')}")
-  st.warning('Score threshold requires Cogniser validation. A received face event is not proof of an approved match threshold.')
+  st.warning('Identity acceptance threshold pending device validation.')
  elif step in (2,4):
-  if not ppe:st.info('No PPE JSON received yet. Run TEST_PPE_SAMPLE.bat or configure Cogniser LAN push.');return
+  if not ppe:st.info('No PPE Detection event received.');return
   d=json.loads(ppe['payload']);rows=d.get('rectList') or []
   with connect() as c:
    face_row_id=c.execute("SELECT payload FROM events WHERE event='cogniser_face_raw' AND accepted=1 ORDER BY id DESC LIMIT 1").fetchone()
@@ -202,12 +202,12 @@ def cogniser_checkpoint_live(step):
   if step==2:st.info('Face mask and hair cover are decoded automatically at Step 2. Clothing and shoes still require a separate trained model or confirmed inspection event.')
   else:st.info('Glove status is read from the latest PPE event automatically. Each valid PPE rectangle creates a new audit attempt.')
   st.info('The individual component result can be PASS/FAIL even while the overall inspection is PENDING due to other missing mandatory checks. 1 = worn, 0 = not worn. Latest Face Recognition determines employee. The most recent valid detection entry supplies the latest component result. Identity and event ordering require factory validation.')
- else:st.info('This checkpoint requires a separate sensor, validated AI model, or operator confirmation. The provided Face/PPE JSON does not contain its result.')
+ else:st.info('This checkpoint requires an approved sensor or operator verification. No confirmed result is currently recorded.')
 
 with tabs[0]:
  live_overview()
 with tabs[1]:
- st.header('Face Recognition · Camera Identity Layer');st.write('Cogniser sends the complete facecompare JSON. The receiver extracts strRes.peopleName and creates a session if no other attempt is active.');st.code('POST http://MINI_PC_IP:8022/api/cogniser/face\nGET http://MINI_PC_IP:8022/api/cogniser/face/latest',language='http');st.info('Use TEST_FACE_SAMPLE.bat to simulate Employee ID 593037. Match threshold must be validated with Cogniser.')
+ st.header('Face Recognition · Camera Identity Layer');st.write('Employee identification records received from Camera 1 are displayed below.');st.info('Identity matching must meet approved factory acceptance criteria.')
  cogniser_checkpoint_live(0)
 @st.fragment(run_every="5s")
 def live_checkpoint(i):
@@ -217,7 +217,7 @@ def live_checkpoint(i):
  detected=latest_ppe_component_results()
  for key in STEPS[i]:
   label=LABEL[key]
-  typ='AI MODEL TRAINING PROPOSED' if key in ORANGE else ('MANUAL / FACTORY CONFIRMATION' if key in MANUAL else ('THERMAL SENSOR' if key=='temperature' else ('METAL DETECTOR' if key=='mobile_phone' else 'COGNISER DETECTION')))
+  typ='REQUIRES VERIFIED DETECTION METHOD' if key in ORANGE else ('MANUAL / FACTORY CONFIRMATION' if key in MANUAL else ('THERMAL SENSOR' if key=='temperature' else ('METAL DETECTOR' if key=='mobile_phone' else 'COGNISER DETECTION')))
   st.markdown(f'**{label}** · `{typ}`')
   display=detected.get(key) if key in ('hair_cover','face_mask','gloves') else confirmed.get(key)
   st.write('Status: **'+(f'{display} · CONFIRMED COGNISER DETECTION' if key in detected else (display or 'PENDING · NO CONFIRMED RESULT FOR THIS FACE SESSION'))+'**')
@@ -253,6 +253,15 @@ with tabs[7]:
    st.caption('PASS/FAIL here refers to individual checks. Overall PENDING means some mandatory checks are still missing. Each valid PPE rectangle is one inspection attempt.')
  st.download_button('Download Audit CSV',df.drop(columns=['internal_id']).to_csv(index=False).encode('utf-8-sig'),'cogniser_original_flow_audit.csv','text/csv')
  st.subheader('Recent Incoming Events');st.caption('Events count inbound messages; a single PPE message can contain multiple independent PPE attempts.');st.dataframe(events,use_container_width=True,hide_index=True)
+ with connect() as cloud_conn:
+  exists=cloud_conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='cloud_evidence'").fetchone()
+  if exists:
+   cloud_df=pd.read_sql_query('SELECT event_time,event_type,employee_id,camera_id,accepted,payload FROM cloud_evidence ORDER BY event_time DESC',cloud_conn)
+   st.subheader('Supabase Cloud Evidence · Face / PPE')
+   st.caption('Cloud mirror records are evidence only. Identity association and full 15-check inspection are NOT verified by this cloud mirror.')
+   st.dataframe(cloud_df,use_container_width=True,hide_index=True)
+   st.download_button('Download Cloud Evidence CSV',cloud_df.to_csv(index=False).encode('utf-8-sig'),'cogniser_cloud_evidence.csv','text/csv')
+
  st.subheader('Factory Form · Monthly Audit · Word Report')
  from reporting import monthly,factory_pdf,word_report,summary,ollama_report
  from datetime import datetime
@@ -263,49 +272,61 @@ with tabs[7]:
   st.download_button('Download Factory Form PDF',factory_pdf(month,report_df),f'FACTORY_FORM_{month}.pdf',mime='application/pdf')
   st.download_button('Download Monthly Word Report',word_report(month,report_df,report_checks),f'COGNISER_MONTHLY_REPORT_{month}.docx',mime='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
   st.caption('Factory form: latest completed PASS/FAIL per employee per day. Pending observations do not overwrite completed results. QA approval required before official factory use.')
-  st.caption('LLM report uses Ollama separately; AI analysis is not a substitute for confirmed inspection evidence.')
+  st.caption('Review commentary does not replace verified inspection records.')
  except Exception as exc:st.error(f'Report generation: {exc}')
- st.warning('This prototype does not claim ISO certification or physical gate control.')
+ st.warning('Inspection records support internal food safety monitoring; certification status and physical access control are managed separately.')
 with tabs[8]:
- st.header('LAN Data Receiver · Integration Guide')
+ st.header('Cogniser Data Interface · Connection Status')
  st.success('FastAPI receiver: POST /api/cogniser/face, /api/cogniser/ppe, and confirmed /api/events/...')
  st.code('POST /api/events/temperature\n{"value":36.7,"source":"THERMAL_SENSOR"}\n\nPOST /api/events/check\n{"key":"hair_cover","result":"PASS","source":"COGNISER"}',language='http')
  st.code('POST http://MINI_PC_IP:8022/api/cogniser/ppe\nGET http://MINI_PC_IP:8022/api/cogniser/ppe/latest',language='http')
- st.write('Cogniser must be configured to transmit to the Mini PC IP address, and its actual JSON format must be mapped to these event fields. This receiver does not magically interpret unknown vendor messages.')
+ st.write('Integration status: Device interface verification pending.')
  st.write('Step 1: temperature, ear_ring, necklace, bracelet, ring, nail, wound, plaster. Step 2: hair_cover, face_mask, protective_clothing, shoes. Step 3: hand_washing. Step 4: gloves. Step 5: mobile_phone.')
- st.warning('Gate Open is virtual eligibility only. Never connect a physical gate before hardware interlocks, fail-safe controls and QA sign-off.')
+ st.warning('Access eligibility is informational. Physical access-control integration is not enabled.')
 
 with tabs[8]:
- st.subheader('Raw Cogniser JSON testing')
- st.write('POST `/api/cogniser/face` to set the latest employee. POST `/api/cogniser/ppe` to decode glove-mask-hat (1 worn / 0 absent). Automatic decisions are limited to the active checkpoint. Physical gate is not connected.')
+ st.subheader('Cogniser Interface Status')
+ st.write('Face Recognition and PPE Detection event interfaces. Inspection results remain subject to approved verification and access-control procedures.')
 
 # v28: original-flow monthly factory form, full audit and optional SOP-grounded LLM
 from reporting import monthly,summary,factory_pdf,word_report,ollama_report,SOP
 with tabs[7]:
  st.divider()
- st.subheader('Factory Form FM-PD-01-01 · Monthly Audit · LLM Report')
+ st.subheader('Factory Form FM-PD-01-01 · Monthly Audit · Compliance Review')
  month=st.text_input('Reporting month (YYYY-MM)',value=__import__('datetime').datetime.now().strftime('%Y-%m'),key='report_month')
  try:
   mdf,mchecks=monthly(month);tot=summary(mdf)
   c1,c2,c3,c4=st.columns(4)
   c1.metric('Attempts',tot['attempts']);c2.metric('PASS',tot['pass']);c3.metric('FAIL',tot['fail']);c4.metric('PENDING',tot['pending'])
-  st.caption('Factory Form follows the original two-half-month reference layout and uses the latest COMPLETED PASS/FAIL per employee per day. PENDING never overwrites completed results. All attempts remain in Monthly Audit.')
+  st.caption('Monthly form uses the latest completed PASS/FAIL per employee per day. Incomplete records remain PENDING and are retained in the audit history.')
   st.download_button('Download Factory Form FM-PD-01-01 (PDF)',data=factory_pdf(month,mdf),file_name=f'FM-PD-01-01_{month}.pdf',mime='application/pdf')
   st.download_button('Download Monthly Audit (CSV)',data=mdf.to_csv(index=False).encode('utf-8-sig'),file_name=f'MONTHLY_AUDIT_{month}.csv',mime='text/csv')
-  st.markdown('**Factory SOP reference: SD-PD-01-01**')
+  st.markdown('**Reference framework: ISO 22000:2018 and ISO 22002-100:2025, Clause 14**')
   for ref,rule in SOP:st.caption(f'{ref}: {rule}')
-  model=st.text_input('Local Ollama model',value='llama3.2:1b',key='v28_model')
+  model=st.text_input('Analysis Engine',value='llama3.2:1b',key='v28_model')
   if 'v28_ai' not in st.session_state:st.session_state.v28_ai={}
-  if st.button('Generate AI Analysis (Ollama)',key='v28_gen'):
+  if st.button('Generate Compliance Review',key='v28_gen'):
    try:
     with st.spinner('Analysing recorded monthly data...'):
      st.session_state.v28_ai[month]=ollama_report(month,mdf,model)
-   except Exception as exc:st.error(f'Ollama unavailable: {exc}. You can still export a deterministic Word report.')
+   except Exception as exc:st.error('Compliance review service unavailable. The standard report remains available.')
   analysis=st.session_state.v28_ai.get(month,'')
-  if analysis:st.text_area('AI Analysis',analysis,height=250)
+  if analysis:st.text_area('Compliance Review',analysis,height=250)
   st.download_button('Download Professional Monthly Report (Word)',data=word_report(month,mdf,mchecks,analysis),file_name=f'COGNISER_MONTHLY_REPORT_{month}.docx',mime='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
-  st.info('ISO / factory QA approval is not implied. Physical gate, sensors and vendor PPE person-matching still require commissioning.')
+  st.info('Compliance review requires authorized QA verification. Device and access-control integration status must be confirmed separately.')
  except Exception as exc:st.error(f'Report error: {exc}')
 
 with tabs[9]:
  hardware_simulation()
+
+# Local-only data management. Never delete cloud evidence from an online dashboard.
+if not __import__('os').environ.get('COGNISER_ONLINE'):
+ with st.sidebar.expander('DATA MANAGEMENT · LOCAL ONLY'):
+  st.warning('This deletes local events and attempts only. Online Supabase records are NOT deleted. A backup is created first.')
+  confirm=st.checkbox('I understand: delete all LOCAL inspection records',key='local_reset_confirm')
+  if st.button('DELETE ALL LOCAL DATA',disabled=not confirm,type='secondary'):
+   from local_admin import reset_local
+   try:
+    st.success(reset_local())
+    st.rerun()
+   except Exception as exc: st.error(f'Reset failed; no claim of success: {exc}')
