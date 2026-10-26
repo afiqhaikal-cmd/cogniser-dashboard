@@ -86,6 +86,18 @@ def refresh_cloud():
             event_id TEXT, position INTEGER, local_attempt_id INTEGER,
             PRIMARY KEY(event_id, position))''')
 
+        # Remove legacy cloud-mirror attempts created before cloud_attempt_map existed.
+        # Scope is restricted to the hosted mirror's dedicated source marker.
+        # Do not touch factory-originated inspection attempts.
+        legacy_ids = [row[0] for row in c.execute(
+            """SELECT id FROM attempts
+               WHERE source = 'COGNISER_PPE_DETECTION'
+                 AND id NOT IN (SELECT local_attempt_id FROM cloud_attempt_map)"""
+        ).fetchall()]
+        for legacy_id in legacy_ids:
+            c.execute('DELETE FROM checks WHERE attempt_id=?', (legacy_id,))
+            c.execute('DELETE FROM attempts WHERE id=?', (legacy_id,))
+
         # Only remove rows that this cloud bridge previously created.
         # Avoid modifying unrelated local or manually entered records.
         cloud_attempt_ids = [r[0] for r in c.execute(
