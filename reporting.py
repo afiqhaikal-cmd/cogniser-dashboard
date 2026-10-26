@@ -105,10 +105,10 @@ def factory_pdf(month, df):
  return buf.getvalue()
 
 def word_report(month,df,checks,analysis=''):
- stat=summary(df);d=Document();sec=d.sections[0];sec.header.paragraphs[0].text='COGNISER  |  FACTORY HYGIENE INSPECTION'
+ stat=summary(df);d=Document();sec=d.sections[0];sec.header.paragraphs[0].text='FOOD SAFETY MONITORING-ISO22000  |  HYGIENE INSPECTION'
  normal=d.styles['Normal'];normal.font.name='Aptos';normal.font.size=Pt(9)
  d.add_heading('Monthly Hygiene Inspection Report',0);d.add_paragraph(f'Report period: {month}  |  Form reference: FM-PD-01-01  |  SOP: SD-PD-01-01')
- d.add_paragraph('Development report for factory QA review. Not an ISO certification or approved factory record.')
+ d.add_paragraph('Internal inspection record for QA review. Final compliance assessment requires authorized verification.')
  d.add_heading('1. Executive Summary',level=1)
  t=d.add_table(rows=0,cols=2);t.style='Light Shading Accent 1'
  for k,v in [('Total attempts',stat['attempts']),('PASS',stat['pass']),('FAIL',stat['fail']),('PENDING',stat['pending']),('INTERRUPTED',stat['interrupted']),('Unique employees',stat['employees'])]:
@@ -138,8 +138,8 @@ def word_report(month,df,checks,analysis=''):
  else:d.add_paragraph('No recorded failures for this month. Pending attempts are not counted as failures.')
  d.add_heading('4. Factory SOP Reference',level=1)
  for ref,rule in SOP:d.add_paragraph(f'{ref}: {rule}',style='List Bullet')
- d.add_heading('5. AI Analysis',level=1)
- d.add_paragraph(analysis.strip() if analysis.strip() else 'AI analysis not generated. Inspection statistics above are derived from recorded data only.')
+ d.add_heading('5. Compliance Review',level=1)
+ d.add_paragraph(analysis.strip() if analysis.strip() else 'No supplementary compliance commentary recorded. Inspection statistics are based on recorded data.')
  d.add_paragraph('Prepared by: ____________________    Reviewed by: ____________________')
  d.add_paragraph('QA review and approval required before official use.')
  b=BytesIO();d.save(b);return b.getvalue()
@@ -148,10 +148,24 @@ def ollama_report(month,df,model='llama3.2:1b'):
  import urllib.request,json,urllib.error
  stat=summary(df)
  data={'month':month,'summary':{k:v for k,v in stat.items() if k!='reasons'},'failure_reasons':dict(stat['reasons'])}
- prompt=('Write a concise professional food factory hygiene monthly report in English, with Findings, Corrective Actions, Recommendations. '
-         'Use ONLY the supplied audit counts and reasons. Never invent checks, outcomes, causes or actions already taken. '
-         'Pending means incomplete, not FAIL. SOP rules are reference guidance, not proof of compliance. '
-         'No ISO certification claim.\nSOP: '+json.dumps(SOP)+'\nAUDIT: '+json.dumps(data))
+ prompt=(
+  "Prepare a concise, evidence-grounded monthly food safety and personnel hygiene compliance review in English. "
+  "Use the headings: Recorded Findings, Outstanding Verification, Corrective Action Recommendations, ISO Reference, QA Review. "
+  "Use ONLY the provided recorded audit counts and failure reasons; do not invent events, dates, actions, causes, health conditions or approvals. "
+  "A PENDING or INTERRUPTED inspection is incomplete, never automatically FAIL or PASS. "
+  "Do not infer an ISO nonconformity from a detection alone. Explain what additional QA evidence is required. "
+  "Cite ISO 22002-100:2025 Clause 14 as a contextual PRP reference only when relevant: "
+  "14.1 General; 14.2 Hygiene facilities; 14.3 Designated eating areas; "
+  "14.4 Workwear and protective clothing; 14.5 Health status; "
+  "14.6 Personnel cleanliness; 14.7 Personnel behaviour; 14.8 Visitors and external providers. "
+  "Do not quote or fabricate ISO requirements or assert that certification has been achieved. "
+  "Factory SOP SD-PD-01-01 is separate from ISO and must be verified against the approved factory copy. "
+  "Never assume CCTV confirms handwashing, body temperature, illness or jewellery absence without validated evidence. "
+  "Do not recommend automatic gate authorization based on these records. "
+  "If data are insufficient, explicitly state Not established from available records. "
+  "FACTORY SOP REFERENCE: " + json.dumps(SOP,ensure_ascii=False) +
+  "\nRECORDED AUDIT DATA: " + json.dumps(data,ensure_ascii=False)
+ )
  body=json.dumps({'model':model,'prompt':prompt,'stream':False}).encode()
  req=urllib.request.Request('http://127.0.0.1:11434/api/generate',data=body,headers={'Content-Type':'application/json'})
  with urllib.request.urlopen(req,timeout=150) as response:return json.loads(response.read())['response']
