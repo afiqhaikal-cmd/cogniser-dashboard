@@ -1,5 +1,6 @@
-"""Read-only Cogniser Supabase mirror: one checkpoint per accepted face event.
+"""Incremental read-only Cogniser Supabase mirror: one checkpoint per accepted face event.
 Deploy ONLY on hosted Streamlit, not factory Mini PC. Never scores PPE bits as PASS.
+Existing mirror records are preserved across refreshes.
 """
 import json
 import urllib.parse
@@ -52,23 +53,26 @@ def refresh_cloud():
         c.execute('CREATE TABLE IF NOT EXISTS cloud_ppe_attempts(event_id TEXT,attempt_index INTEGER,employee_id TEXT,camera_id TEXT,raw_value TEXT,overall_status TEXT,observations TEXT,PRIMARY KEY(event_id,attempt_index))')
         c.execute('CREATE TABLE IF NOT EXISTS cloud_event_map(event_id TEXT PRIMARY KEY,local_event_id INTEGER)')
         c.execute('CREATE TABLE IF NOT EXISTS cloud_attempt_map(event_id TEXT,position INTEGER,local_attempt_id INTEGER,PRIMARY KEY(event_id,position))')
-        # Remove ONLY previous mirror-owned attempts/events. No factory or manual data.
-        ids={r[0] for r in c.execute('SELECT local_attempt_id FROM cloud_attempt_map')}
-        # Legacy online mirror source: never delete other sources.
-        ids.update(r[0] for r in c.execute("SELECT id FROM attempts WHERE source='COGNISER_PPE_DETECTION' AND id NOT IN (SELECT local_attempt_id FROM cloud_attempt_map)"))
-        ids.update(r[0] for r in c.execute("SELECT id FROM attempts WHERE source='CLOUD_FACE_CHECKPOINT'"))
-        for aid in ids:
-            c.execute('DELETE FROM checks WHERE attempt_id=?',(aid,))
-            c.execute('DELETE FROM attempts WHERE id=?',(aid,))
-        for (eid,) in c.execute('SELECT local_event_id FROM cloud_event_map').fetchall():
-            c.execute('DELETE FROM events WHERE id=?',(eid,))
-        for table in ('cloud_attempt_map','cloud_event_map','cloud_ppe_attempts','cloud_evidence'):
-            c.execute('DELETE FROM '+table)
+        # Incremental, idempotent mirror: NEVER delete or recreate mirrored history.
+        # Keep all factory/local/manual records untouched.
         latest_face=None
         for r in records:
             eid=r.get('event_id'); typ=r.get('event_type')
             if not eid: continue
             p=_dict(r.get('payload')); emp=r.get('employee_id'); camera=r.get('camera_id'); when=r.get('event_time') or ''
+            # Restore the face context even when this cloud event was mirrored earlier.
+            # A repeated dashboard refresh must not create another checkpoint.
+            existing=c.execute('SELECT local_event_id FROM cloud_event_map WHERE event_id=?',(str(eid),)).fetchone()
+            if existing:
+                if typ=='face':
+                    mapped=c.execute('''SELECT a.id,a.employee_id FROM cloud_attempt_map m
+                                        JOIN attempts a ON a.id=m.local_attempt_id
+                                        WHERE m.event_id=? AND a.source='CLOUD_FACE_CHECKPOINT'
+                                        ORDER BY m.position LIMIT 1''',(str(eid),)).fetchone()
+                    if mapped:
+                        latest_face={'employee':str(mapped['employee_id']),
+                                     'camera':str(camera or ''),'attempt':mapped['id']}
+                continue
             accepted=_accepted(p.get('accepted'))
             c.execute('INSERT OR REPLACE INTO cloud_evidence VALUES(?,?,?,?,?,?,?)',(eid,when,typ,emp,camera,str(accepted),json.dumps(p,ensure_ascii=False)))
             if typ not in ('face','ppe','manual_temperature','manual_inspection'):
