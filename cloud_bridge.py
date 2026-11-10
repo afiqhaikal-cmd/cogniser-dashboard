@@ -114,9 +114,30 @@ def refresh_cloud():
                 rects=_rects(p)
                 for pos,rect in enumerate(rects,1):
                     c.execute('INSERT OR REPLACE INTO cloud_ppe_attempts VALUES(?,?,?,?,?,?,?)',(eid,pos,emp,camera,str(rect.get('value','')),'UNVERIFIED',json.dumps({},ensure_ascii=False)))
-                # Never infer PASS/FAIL from unverified PPE bit mapping.
-                # Preserve received evidence, but do not create additional attempts.
-                if latest_face and (str(emp)!=latest_face['employee'] or str(camera or '')!=latest_face['camera']):
-                    c.execute('UPDATE events SET accepted=0,note=? WHERE id=?',('PPE identity/camera association unverified; raw evidence retained',face_event_id))
+                # Only a locally verified alarm may create FAIL. Never infer PASS from PPE bits.
+                matched = (latest_face is not None and accepted
+                           and str(emp) == latest_face['employee']
+                           and bool(camera) and str(camera) == latest_face['camera']
+                           and p.get('matching_status') == 'MATCHED')
+                failed = p.get('failed_items')
+                verified = p.get('ppe_mapping_verified') is True
+                if matched and verified and p.get('alarm_only') is True and isinstance(failed, list):
+                    allowed = {'gloves', 'hair_cover', 'face_mask', 'protective_clothing', 'shoes'}
+                    from core import recalculate
+                    for item in sorted(set(failed) & allowed):
+                        prior = c.execute('SELECT 1 FROM checks WHERE attempt_id=? AND key=?',
+                                          (latest_face['attempt'], item)).fetchone()
+                        if prior is None:
+                            c.execute('INSERT INTO checks(attempt_id,key,status,source,time) VALUES(?,?,?,?,?)',
+                                      (latest_face['attempt'], item, 'FAIL', 'CLOUD_COGNISER_PPE_ALARM', when))
+                            recalculate(c, latest_face['attempt'])
+                    c.execute('UPDATE events SET note=? WHERE id=?',
+                              ('Matched PPE alarm; locally verified FAIL items applied (vendor mapping must be validated)',face_event_id))
+                elif not matched:
+                    c.execute('UPDATE events SET note=? WHERE id=?',
+                              ('PPE association unverified; raw evidence retained',face_event_id))
+                else:
+                    c.execute('UPDATE events SET note=? WHERE id=?',
+                              ('PPE mapping or alarm status unverified; no check changed',face_event_id))
         c.commit()
     return len(records)
