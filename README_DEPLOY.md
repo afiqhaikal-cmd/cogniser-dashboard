@@ -14,3 +14,10 @@ Face Recognition -> PPE Sample (Gloves PASS, Mask FAIL, Hair Cover PASS) -> see 
 
 ## Limits
 No real Cogniser events, no database persistence, no production authentication, no physical lamp/audio/gate. Demo audit CSV is not the official factory report. Cloud deployment requires the owner's GitHub/Streamlit login and cannot be completed by simply sharing this ZIP.
+
+
+Patch: ONLINE now displays camera ID consistently and session created from a mirrored attempt.
+Timestamp captions in the live overview use Asia/Kuala_Lumpur (+08:00).
+PPE rectangles are raw evidence only and are never converted into PASS/FAIL.
+The local sync must run with the updated script in the accompanying LOCAL ZIP.
+Deploy the online folder contents to the existing GitHub repo and allow Streamlit Cloud to redeploy.
