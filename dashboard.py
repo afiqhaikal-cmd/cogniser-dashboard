@@ -1,3 +1,11 @@
+
+from datetime import datetime, timezone, timedelta
+def malaysia_time(value):
+ try:
+  dt=datetime.fromisoformat(str(value).replace('Z','+00:00'))
+  if dt.tzinfo is None: return str(value)+' (timezone unspecified)'
+  return dt.astimezone(timezone(timedelta(hours=8))).isoformat(timespec='seconds')
+ except (ValueError,TypeError): return str(value)
 import streamlit as st,pandas as pd,sqlite3
 from core import connect,snapshot,STEPS,LABEL,ORANGE,MANUAL
 import json
@@ -99,15 +107,18 @@ def live_overview():
  st.divider()
  st.subheader('Live Cogniser Face Recognition · Shared Camera')
  with connect() as c:
-  face_row=c.execute("SELECT time,payload,note FROM events WHERE event='cogniser_face_raw' ORDER BY id DESC LIMIT 1").fetchone()
+  face_row=c.execute("SELECT id,time,payload,accepted,note FROM events WHERE event='cogniser_face_raw' ORDER BY id DESC LIMIT 1").fetchone()
  if face_row:
   face_data=json.loads(face_row['payload'])
   f1,f2,f3,f4=st.columns(4)
   f1.metric('Employee ID',face_data.get('employee_id','—'))
-  f2.metric('Camera',face_data.get('equipmentName') or '—')
+  f2.metric('Camera',face_data.get('equipmentId') or face_data.get('equipmentName') or '—')
   f3.metric('Match score',str(face_data.get('score','—')))
-  f4.metric('Session created','YES' if face_data.get('accepted') else 'NO')
-  st.caption(f"Received at {face_row['time']} (source timestamp) · Library: {face_data.get('faceLibName','—')} · {face_row['note']}")
+  
+  with connect() as session_conn:
+   session_exists=bool(session_conn.execute('SELECT 1 FROM attempts WHERE face_session_id=? LIMIT 1',(face_row['id'],)).fetchone())
+  f4.metric('Session created','YES' if face_row['accepted'] and session_exists else 'NO')
+  st.caption(f"Received at {malaysia_time(face_row['time'])} (Malaysia time) · Library: {face_data.get('faceLibName','—')} · {face_row['note']}")
   st.info('Face matching threshold pending validation. Device thermal metadata is not treated as body temperature.')
  else:st.info('Awaiting Face Recognition event.')
  st.divider()
@@ -117,10 +128,10 @@ def live_overview():
  if raw:
   data=json.loads(raw['payload']);rects=data.get('rectList',[])
   a1,a2,a3=st.columns(3)
-  a1.metric('Camera',data.get('equipmentName') or '—')
+  a1.metric('Camera',data.get('equipmentId') or data.get('equipmentName') or '—')
   a2.metric('PPE alarm rectangles',len([r for r in rects if len(str(r.get('value','')).split('-'))==3 and all(v in ('0','1') for v in str(r.get('value','')).split('-'))]))
   a3.metric('Linked employee',data.get('employee_id') or '—')
-  st.caption(f"Received at {raw['time']} (source timestamp) · Task: {data.get('taskName','—')}")
+  st.caption(f"Received at {malaysia_time(raw['time'])} (Malaysia time) · Task: {data.get('taskName','—')}")
   if rects:
    st.dataframe(pd.DataFrame([{'Object ID':r.get('id'),'Cogniser raw value':r.get('value'),'Employee ID (sequence)':data.get('employee_id') or '—'} for r in rects]),use_container_width=True,hide_index=True)
   st.info(f'Latest PPE message: {len(rects)} rectangles. Rectangles are observations, not separate employee attempts. Device bit mapping requires vendor confirmation.')
@@ -142,12 +153,12 @@ def show_decoded_ppe(data, component=None):
 def cogniser_checkpoint_live(step):
  st.subheader('Live Cogniser evidence · automatic refresh (5 seconds)')
  with connect() as c:
-  face=c.execute("SELECT time,payload,note FROM events WHERE event='cogniser_face_raw' ORDER BY id DESC LIMIT 1").fetchone()
+  face=c.execute("SELECT id,time,payload,accepted,note FROM events WHERE event='cogniser_face_raw' ORDER BY id DESC LIMIT 1").fetchone()
   ppe=c.execute("SELECT time,payload,note FROM events WHERE event='cogniser_ppe_raw' ORDER BY id DESC LIMIT 1").fetchone()
  if step==0:
   if not face:st.info('No Face Recognition event received.');return
   d=json.loads(face['payload']);x,y,z=st.columns(3)
-  x.metric('Employee ID',d.get('employee_id') or '—');y.metric('Camera',d.get('equipmentName') or '—');z.metric('Match score',str(d.get('score','—')))
+  x.metric('Employee ID',d.get('employee_id') or '—');y.metric('Camera',d.get('equipmentId') or d.get('equipmentName') or '—');z.metric('Match score',str(d.get('score','—')))
   st.caption(f"Received: {face['time']} · Library: {d.get('faceLibName')} · Session accepted: {d.get('accepted')}")
   st.warning('Identity acceptance threshold pending device validation.')
  elif step in (2,4):
@@ -158,7 +169,7 @@ def cogniser_checkpoint_live(step):
    face_employee=json.loads(face_row_id['payload']).get('employee_id','—') if face_row_id else '—'
    face_session=c.execute("SELECT id FROM events WHERE event='cogniser_face_raw' AND accepted=1 ORDER BY id DESC LIMIT 1").fetchone()
    ppe_count=c.execute("SELECT COUNT(*) FROM attempts WHERE face_session_id=? AND source='CLOUD_FACE_CHECKPOINT'",(face_session['id'],)).fetchone()[0] if face_session else 0
-  x,y,z=st.columns(3);x.metric('Camera',d.get('equipmentName') or '—');y.metric('PPE alarm rectangles',len([r for r in rows if len(str(r.get('value','')).split('-'))==3 and all(v in ('0','1') for v in str(r.get('value','')).split('-'))]));z.metric('Linked employee',d.get('employee_id') or '—')
+  x,y,z=st.columns(3);x.metric('Camera',d.get('equipmentId') or d.get('equipmentName') or '—');y.metric('PPE alarm rectangles',len([r for r in rows if len(str(r.get('value','')).split('-'))==3 and all(v in ('0','1') for v in str(r.get('value','')).split('-'))]));z.metric('Linked employee',d.get('employee_id') or '—')
   st.caption(f"Received: {ppe['time']} · {d.get('taskName','')} · Source event stored")
   show_decoded_ppe(d, ('Face Mask','Hair Cover') if step==2 else ('Gloves',))
   with st.expander('Raw Cogniser codes (technical reference)'):
