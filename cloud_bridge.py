@@ -71,8 +71,31 @@ def refresh_cloud():
             p=_dict(r.get('payload')); emp=r.get('employee_id'); camera=r.get('camera_id'); when=r.get('event_time') or ''
             accepted=_accepted(p.get('accepted'))
             c.execute('INSERT OR REPLACE INTO cloud_evidence VALUES(?,?,?,?,?,?,?)',(eid,when,typ,emp,camera,str(accepted),json.dumps(p,ensure_ascii=False)))
-            if typ not in ('face','ppe'): continue
+            if typ not in ('face','ppe','manual_temperature','manual_inspection','cogniser_unknown'): continue
             display=dict(p); display.update({'employee_id':emp,'equipmentId':camera,'equipmentName':p.get('equipmentName') or camera,'accepted':accepted})
+            if typ in ('manual_temperature','manual_inspection','cogniser_unknown'):
+                kind = {'manual_temperature':'manual_temperature', 'manual_inspection':'manual_inspection', 'cogniser_unknown':'cogniser_unknown_raw'}[typ]
+                display.update({'key':p.get('inspection_key'), 'result':p.get('inspection_result'),
+                                'value_celsius':p.get('value_celsius'), 'operator_id':p.get('operator_id'),
+                                'reason':p.get('manual_reason'), 'source':p.get('inspection_source')})
+                cur=c.execute('INSERT INTO events(time,event,payload,accepted,note) VALUES(?,?,?,?,?)',
+                              (when,kind,json.dumps(display,ensure_ascii=False),int(accepted),'Supabase read-only evidence'))
+                c.execute('INSERT INTO cloud_event_map VALUES(?,?)',(eid,cur.lastrowid))
+                if typ in ('manual_temperature','manual_inspection') and accepted:
+                    # Associate only with latest open face checkpoint, matching employee, and a confirmed item.
+                    key=p.get('inspection_key'); result=p.get('inspection_result')
+                    if latest_face and str(emp)==latest_face['employee'] and key in ('temperature','ear_ring','necklace','bracelet','ring','nail','wound','plaster','hair_cover','face_mask','protective_clothing','shoes','hand_washing','gloves','mobile_phone') and result in ('PASS','FAIL'):
+                        prior=c.execute('SELECT 1 FROM checks WHERE attempt_id=? AND key=?',(latest_face['attempt'],key)).fetchone()
+                        if prior is None:
+                            c.execute('INSERT INTO checks(attempt_id,key,status,source,time) VALUES(?,?,?,?,?)',
+                                      (latest_face['attempt'],key,result,'CLOUD_MANUAL',when))
+                            from core import recalculate
+                            recalculate(c,latest_face['attempt'])
+                        else:
+                            c.execute('UPDATE events SET note=? WHERE id=?',('Duplicate/conflicting manual result; requires review',cur.lastrowid))
+                    else:
+                        c.execute('UPDATE events SET note=? WHERE id=?',('Manual evidence not linked to a verified face session',cur.lastrowid))
+                continue
             if typ=='face':
                 kind='cogniser_face_raw'
                 display['score']=p.get('score'); display['faceLibName']=p.get('faceLibName','—')
@@ -81,7 +104,7 @@ def refresh_cloud():
             cur=c.execute('INSERT INTO events(time,event,payload,accepted,note) VALUES(?,?,?,?,?)',(when,kind,json.dumps(display,ensure_ascii=False),int(accepted),'Supabase read-only mirror'))
             face_event_id=cur.lastrowid
             c.execute('INSERT INTO cloud_event_map VALUES(?,?)',(eid,face_event_id))
-            if typ=='face' and accepted and emp is not None and p.get('attempt_id') is not None:
+            if typ=='face' and accepted and emp is not None:
                 if latest_face:
                     c.execute("UPDATE attempts SET finished=?,reason=? WHERE id=? AND finished IS NULL",(when,'Superseded by next cloud face event',latest_face['attempt']))
                 attempt=c.execute("INSERT INTO attempts(employee_id,started,stage,status,reason,source,face_session_id) VALUES(?,?,1,'PENDING',?,?,?)",(str(emp),when,'Awaiting mandatory verified inspection evidence','CLOUD_FACE_CHECKPOINT',face_event_id))
