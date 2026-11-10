@@ -8,28 +8,9 @@ st.markdown('<div class="hero"><h1>FOOD SAFETY MONITORING-ISO22000</h1><p>Face R
 st.caption('DATA REFRESH · 5 SECONDS | Inspection status is based on recorded and verified events.')
 s=snapshot();a=s['active'];last=s['latest'];current=a or last;state=(a['status'] if a else (last['status'] if last else 'WAITING'));color={'READY':'#ffffff','PASS':'#16a34a','FAIL':'#dc2626','WAITING':'#ffffff','PENDING':'#2563eb','INTERRUPTED':'#64748b'}.get(state,'#64748b')
 def latest_ppe_component_results():
- """Read the latest accepted PPE rectangle for the current face event.
- Do not rely on the active attempt or an earlier session's checks.
- """
- with connect() as c:
-  face=c.execute("SELECT id,payload FROM events WHERE event='cogniser_face_raw' AND accepted=1 ORDER BY id DESC LIMIT 1").fetchone()
-  if not face:return {}
-  employee=str(json.loads(face['payload']).get('employee_id',''))
-  # A PPE event is only applicable after the current face event, for that employee.
-  raws=c.execute("SELECT id,payload FROM events WHERE event='cogniser_ppe_raw' AND accepted=1 AND id>? ORDER BY id DESC",(face['id'],)).fetchall()
-  for raw in raws:
-   evidence=json.loads(raw['payload'])
-   if str(evidence.get('employee_id',''))!=employee:continue
-   detections=evidence.get('detection_attempts') or []
-   if detections:
-    obs=detections[-1].get('observations') or {}
-    if obs:return {k:v for k,v in obs.items() if v in ('PASS','FAIL')}
-  # Persisted checks are fallback only for this exact face session.
-  row=c.execute("SELECT id FROM attempts WHERE face_session_id=? AND employee_id=? AND source='COGNISER_PPE_DETECTION' ORDER BY id DESC LIMIT 1",(face['id'],employee)).fetchone()
-  if row:
-   rows=c.execute("SELECT key,status FROM checks WHERE attempt_id=? AND key IN ('gloves','face_mask','hair_cover')",(row['id'],)).fetchall()
-   return {r['key']:r['status'] for r in rows}
- return {}
+ """Only show confirmed persisted checks for the current checkpoint."""
+ snap=snapshot()
+ return {r['key']:r['status'] for r in snap['checks'] if r['key'] in ('gloves','face_mask','hair_cover')}
 
 def face_ppe_diagnostics():
  with connect() as c:
@@ -48,7 +29,7 @@ def virtual_hardware_status():
  active=snap['active']; last=snap['latest']
  with connect() as c:
   face=c.execute("SELECT id FROM events WHERE event='cogniser_face_raw' AND accepted=1 ORDER BY id DESC LIMIT 1").fetchone()
-  count=c.execute("SELECT COUNT(*) FROM attempts WHERE face_session_id=? AND source='COGNISER_PPE_DETECTION'",(face['id'],)).fetchone()[0] if face else 0
+  count=c.execute("SELECT COUNT(*) FROM attempts WHERE face_session_id=? AND source='CLOUD_FACE_CHECKPOINT'",(face['id'],)).fetchone()[0] if face else 0
  if active:
   return ('PROCESSING','BLUE','Pemeriksaan sedang dijalankan.',count)
  if last and last['status']=='PASS':
@@ -72,14 +53,14 @@ def hardware_simulation():
  a,b,c=st.columns(3)
  a.metric('Current virtual signal',colour)
  b.metric('Inspection state',status)
- c.metric('PPE attempts · current face',count)
+ c.metric('Checkpoint sessions · current face',count)
  st.info('Audio status: '+audio)
  st.caption('External speaker connection: pending commissioning.')
  st.markdown('#### Site layout · agreed 8 October 2026')
  st.markdown('**Server Room (2nd floor):** BMAX B1 Plus Mini PC + Cogniser V1 processing unit')
  st.markdown('**LAN connection:** approximately 30 metres to Front of LAB (4th floor)')
- st.markdown('**Front of LAB:** 2 × Dahua IPC-HFW2441S-S (2.8 mm) CCTV, 1 × edge device (model not selected), 1 × speaker (model not selected), 1 × four-colour status indicator (model not selected)')
- st.caption('Camera 1 · Face Recognition | Camera 2 · PPE Detection | Edge interface · Pending commissioning')
+ st.markdown('**Front of LAB:** 1 × shared checkpoint camera (physical configuration to verify), 1 × edge device (model not selected), 1 × speaker (model not selected), 1 × four-colour status indicator (model not selected)')
+ st.caption('One shared checkpoint camera · Face Recognition + PPE Detection (separate JSON) · Pending commissioning')
 
 tabs=st.tabs(['LIVE OVERVIEW','FACE RECOGNITION','STEP 1 · TEMPERATURE + HYGIENE','STEP 2 · PPE','STEP 3 · HAND WASHING','STEP 4 · GLOVES','STEP 5 · METAL DETECTION','AUDIT & REPORT','COGNISER CONNECTION','4-COLOUR INDICATOR + AUDIO'])
 @st.fragment(run_every="5s")
@@ -98,9 +79,9 @@ def live_overview():
    face_row_id=c.execute("SELECT payload FROM events WHERE event='cogniser_face_raw' AND accepted=1 ORDER BY id DESC LIMIT 1").fetchone()
    face_employee=json.loads(face_row_id['payload']).get('employee_id','—') if face_row_id else '—'
    face_session=c.execute("SELECT id FROM events WHERE event='cogniser_face_raw' AND accepted=1 ORDER BY id DESC LIMIT 1").fetchone()
-   ppe_count=c.execute("SELECT COUNT(*) FROM attempts WHERE face_session_id=? AND source='COGNISER_PPE_DETECTION'",(face_session['id'],)).fetchone()[0] if face_session else 0
-  x,y,z=st.columns(3);x.metric('Employee ID',face_employee);y.metric('Current Step',str(a['stage'])+'/5' if a and face_session and a['face_session_id']==face_session['id'] else '—');z.metric('PPE Attempts (current face)',ppe_count)
-  st.info('Face Recognition identifies the worker and is never counted as an attempt. Every valid PPE detection adds one PPE attempt for that face session. Overall PENDING means other required checks are incomplete.')
+   ppe_count=c.execute("SELECT COUNT(*) FROM attempts WHERE face_session_id=? AND source='CLOUD_FACE_CHECKPOINT'",(face_session['id'],)).fetchone()[0] if face_session else 0
+  x,y,z=st.columns(3);x.metric('Employee ID',face_employee);y.metric('Current Step',str(a['stage'])+'/5' if a and face_session and a['face_session_id']==face_session['id'] else '—');z.metric('Checkpoint sessions (current face)',ppe_count)
+  st.info('One accepted face event creates one checkpoint session. PPE rectangles are evidence within that session, not separate attempts. Overall PENDING means required checks remain unverified.')
  st.subheader('Original Factory Flow')
  columns=st.columns(5)
  for i,col in enumerate(columns,1):
@@ -116,7 +97,7 @@ def live_overview():
      observed=latest_observations[k]+' · latest Cogniser PPE evidence'
     st.write(f'**{LABEL[k]}** — {observed or "PENDING · no confirmed sensor/operator result"}')
  st.divider()
- st.subheader('Live Cogniser Face Recognition · Camera 1')
+ st.subheader('Live Cogniser Face Recognition · Shared Camera')
  with connect() as c:
   face_row=c.execute("SELECT time,payload,note FROM events WHERE event='cogniser_face_raw' ORDER BY id DESC LIMIT 1").fetchone()
  if face_row:
@@ -126,53 +107,36 @@ def live_overview():
   f2.metric('Camera',face_data.get('equipmentName') or '—')
   f3.metric('Match score',str(face_data.get('score','—')))
   f4.metric('Session created','YES' if face_data.get('accepted') else 'NO')
-  st.caption(f"Received at {face_row['time']} (Asia/Bangkok) · Library: {face_data.get('faceLibName','—')} · {face_row['note']}")
+  st.caption(f"Received at {face_row['time']} (source timestamp) · Library: {face_data.get('faceLibName','—')} · {face_row['note']}")
   st.info('Face matching threshold pending validation. Device thermal metadata is not treated as body temperature.')
  else:st.info('Awaiting Face Recognition event.')
  st.divider()
- st.subheader('Live Cogniser PPE Detection · Camera 2')
+ st.subheader('Live Cogniser PPE Detection · Shared Camera')
  with connect() as c:
   raw=c.execute("SELECT time,payload FROM events WHERE event='cogniser_ppe_raw' ORDER BY id DESC LIMIT 1").fetchone()
  if raw:
   data=json.loads(raw['payload']);rects=data.get('rectList',[])
   a1,a2,a3=st.columns(3)
   a1.metric('Camera',data.get('equipmentName') or '—')
-  a2.metric('PPE detections / attempts',len([r for r in rects if len(str(r.get('value','')).split('-'))==3 and all(v in ('0','1') for v in str(r.get('value','')).split('-'))]))
+  a2.metric('PPE alarm rectangles',len([r for r in rects if len(str(r.get('value','')).split('-'))==3 and all(v in ('0','1') for v in str(r.get('value','')).split('-'))]))
   a3.metric('Linked employee',data.get('employee_id') or '—')
-  st.caption(f"Received at {raw['time']} (Asia/Bangkok) · Task: {data.get('taskName','—')}")
+  st.caption(f"Received at {raw['time']} (source timestamp) · Task: {data.get('taskName','—')}")
   if rects:
    st.dataframe(pd.DataFrame([{'Object ID':r.get('id'),'Cogniser raw value':r.get('value'),'Employee ID (sequence)':data.get('employee_id') or '—'} for r in rects]),use_container_width=True,hide_index=True)
-  st.info(f'Latest PPE message: {len(rects)} rectangles. Valid PPE detection entries are counted individually. Device code mapping requires verified configuration.')
+  st.info(f'Latest PPE message: {len(rects)} rectangles. Rectangles are observations, not separate employee attempts. Device bit mapping requires vendor confirmation.')
  else:st.info('Awaiting PPE Detection event.')
  st.caption('Refresh interval: 5 seconds | Access-control output: Not configured')
 
 
 def show_decoded_ppe(data, component=None):
+ """Raw evidence only: PPE bit order and meaning are not vendor-verified."""
  rects=data.get('rectList') or []
- st.markdown('#### Individual PPE Detection · 1 = WORN / 0 = NOT WORN')
- valid=[]
- for idx,r in enumerate(rects,1):
-  bits=str(r.get('value','')).strip().split('-')
-  if len(bits)!=3 or any(v not in ('0','1') for v in bits):
-   st.warning(f'Detection {idx}: unrecognized PPE code {r.get("value")}');continue
-  valid.append(bits)
-  st.markdown(f'**Detection {idx} · Employee {data.get("employee_id") or "Not linked"}**')
-  selected=[(name,bit) for name,bit in zip(('Gloves','Face Mask','Hair Cover'),bits) if component is None or name in component]
-  cols=st.columns(len(selected))
-  for col,(name,bit) in zip(cols,selected):
-   with col:
-    color='#15803d' if bit=='1' else '#b91c1c'
-    bg='#f0fdf4' if bit=='1' else '#fef2f2'
-    status='PASS · WORN' if bit=='1' else 'FAIL · NOT WORN'
-    st.markdown(f'<div style="background:{bg};border:2px solid {color};border-radius:12px;padding:16px;text-align:center"><b>{name}</b><h2 style="color:{color};margin:6px 0">{bit}</h2><b style="color:{color}">{status}</b></div>',unsafe_allow_html=True)
- if valid:
-  st.markdown('#### Latest detection summary (last valid detection entry)')
-  selected=[(j,name) for j,name in enumerate(('Gloves','Face Mask','Hair Cover')) if component is None or name in component]
-  cols=st.columns(len(selected))
-  for col,(j,name) in zip(cols,selected):
-   col.metric(name,'PASS' if valid[-1][j]=='1' else 'FAIL')
-  st.caption('Latest valid detection entry shown. Identity association and event ordering remain subject to device integration verification.')
- else:st.warning('No valid glove-mask-hat values found.')
+ st.markdown('#### PPE alarm evidence · unverified device codes')
+ st.warning('Cogniser PPE bit positions and 0/1 semantics have NOT been confirmed by the vendor. No PASS/FAIL is inferred from these raw codes.')
+ if rects:
+  st.dataframe(pd.DataFrame([{'Rectangle':i,'Object ID':r.get('id'),'Raw code':r.get('value')} for i,r in enumerate(rects,1)]),hide_index=True,use_container_width=True)
+ else:
+  st.info('No PPE rectangles recorded.')
 
 @st.fragment(run_every="5s")
 def cogniser_checkpoint_live(step):
@@ -193,21 +157,21 @@ def cogniser_checkpoint_live(step):
    face_row_id=c.execute("SELECT payload FROM events WHERE event='cogniser_face_raw' AND accepted=1 ORDER BY id DESC LIMIT 1").fetchone()
    face_employee=json.loads(face_row_id['payload']).get('employee_id','—') if face_row_id else '—'
    face_session=c.execute("SELECT id FROM events WHERE event='cogniser_face_raw' AND accepted=1 ORDER BY id DESC LIMIT 1").fetchone()
-   ppe_count=c.execute("SELECT COUNT(*) FROM attempts WHERE face_session_id=? AND source='COGNISER_PPE_DETECTION'",(face_session['id'],)).fetchone()[0] if face_session else 0
-  x,y,z=st.columns(3);x.metric('Camera',d.get('equipmentName') or '—');y.metric('PPE detections / attempts',len([r for r in rows if len(str(r.get('value','')).split('-'))==3 and all(v in ('0','1') for v in str(r.get('value','')).split('-'))]));z.metric('Linked employee',d.get('employee_id') or '—')
+   ppe_count=c.execute("SELECT COUNT(*) FROM attempts WHERE face_session_id=? AND source='CLOUD_FACE_CHECKPOINT'",(face_session['id'],)).fetchone()[0] if face_session else 0
+  x,y,z=st.columns(3);x.metric('Camera',d.get('equipmentName') or '—');y.metric('PPE alarm rectangles',len([r for r in rows if len(str(r.get('value','')).split('-'))==3 and all(v in ('0','1') for v in str(r.get('value','')).split('-'))]));z.metric('Linked employee',d.get('employee_id') or '—')
   st.caption(f"Received: {ppe['time']} · {d.get('taskName','')} · Source event stored")
   show_decoded_ppe(d, ('Face Mask','Hair Cover') if step==2 else ('Gloves',))
   with st.expander('Raw Cogniser codes (technical reference)'):
    st.dataframe(pd.DataFrame([{'Person / object':r.get('id'),'Raw glove-mask-hat code':r.get('value'),'Linked Employee ID':d.get('employee_id') or '—'} for r in rows]),hide_index=True,use_container_width=True)
-  if step==2:st.info('Face mask and hair cover are decoded automatically at Step 2. Clothing and shoes still require a separate trained model or confirmed inspection event.')
-  else:st.info('Glove status is read from the latest PPE event automatically. Each valid PPE rectangle creates a new audit attempt.')
-  st.info('The individual component result can be PASS/FAIL even while the overall inspection is PENDING due to other missing mandatory checks. 1 = worn, 0 = not worn. Latest Face Recognition determines employee. The most recent valid detection entry supplies the latest component result. Identity and event ordering require factory validation.')
+  if step==2:st.info('Mask and hair-cover codes are displayed as raw evidence until vendor mapping is verified. Clothing and shoes require separate validated checks.')
+  else:st.info('Glove alarm evidence is displayed without automatically creating another inspection attempt.')
+  st.info('PPE raw codes do not establish PASS or FAIL. One-person, same-camera and timestamp association must be verified at the factory.')
  else:st.info('This checkpoint requires an approved sensor or operator verification. No confirmed result is currently recorded.')
 
 with tabs[0]:
  live_overview()
 with tabs[1]:
- st.header('Face Recognition · Camera Identity Layer');st.write('Employee identification records received from Camera 1 are displayed below.');st.info('Identity matching must meet approved factory acceptance criteria.')
+ st.header('Face Recognition · Shared Checkpoint Camera');st.write('Employee identification records received from the shared camera are displayed below.');st.info('Identity matching must meet approved factory acceptance criteria.')
  cogniser_checkpoint_live(0)
 @st.fragment(run_every="5s")
 def live_checkpoint(i):
@@ -220,7 +184,7 @@ def live_checkpoint(i):
   typ='REQUIRES VERIFIED DETECTION METHOD' if key in ORANGE else ('MANUAL / FACTORY CONFIRMATION' if key in MANUAL else ('THERMAL SENSOR' if key=='temperature' else ('METAL DETECTOR' if key=='mobile_phone' else 'COGNISER DETECTION')))
   st.markdown(f'**{label}** · `{typ}`')
   display=detected.get(key) if key in ('hair_cover','face_mask','gloves') else confirmed.get(key)
-  st.write('Status: **'+(f'{display} · CONFIRMED COGNISER DETECTION' if key in detected else (display or 'PENDING · NO CONFIRMED RESULT FOR THIS FACE SESSION'))+'**')
+  st.write('Status: **'+(f'{display} · PERSISTED CHECK EVIDENCE' if key in detected else (display or 'PENDING · NO CONFIRMED RESULT FOR THIS FACE SESSION'))+'**')
  if i in (2,4):st.caption('Receiver diagnostic: '+face_ppe_diagnostics())
  cogniser_checkpoint_live(i)
  st.divider()
@@ -228,37 +192,34 @@ def live_checkpoint(i):
 for i,tab in enumerate(tabs[2:7],1):
  with tab:live_checkpoint(i)
 with tabs[7]:
- st.header('Monthly Audit · All Attempts')
- st.caption('One valid PPE detection = one PPE attempt. Numbering restarts at 1 for each Face Recognition. Individual PASS/FAIL is separate from overall PENDING.')
+ st.header('Monthly Audit · All Checkpoint Sessions')
+ st.caption('One accepted face check-in creates one checkpoint session. PPE rectangles are evidence, not extra sessions.')
  with connect() as c:
-  df=pd.read_sql_query("""SELECT ROW_NUMBER() OVER(PARTITION BY face_session_id ORDER BY id) AS ppe_attempt, employee_id,started,finished,stage,status,reason,source,id AS internal_id FROM attempts WHERE source='COGNISER_PPE_DETECTION' ORDER BY id DESC""",c)
+  df=pd.read_sql_query("SELECT id AS attempt_id,employee_id,started,finished,stage,status,reason,source FROM attempts ORDER BY id DESC",c)
   events=pd.read_sql_query('SELECT time,event,accepted,note FROM events ORDER BY id DESC LIMIT 100',c)
- st.dataframe(df.drop(columns=['internal_id']),use_container_width=True,hide_index=True)
- st.subheader('Attempt details · Employee ID / PASS / FAIL / PENDING')
- st.caption('PPE attempt numbering starts at 1 for each accepted Face Recognition. Face Recognition is not an attempt. Internal database identifiers are not shown.')
+ st.dataframe(df,use_container_width=True,hide_index=True)
+ st.subheader('Checkpoint details · confirmed checks')
  with connect() as c:
   details=pd.read_sql_query('SELECT attempt_id,key,status,time FROM checks ORDER BY attempt_id,key',c)
  for _,attempt in df.iterrows():
-  aid=int(attempt['internal_id']);number=int(attempt['ppe_attempt']);emp=str(attempt['employee_id'])
+  aid=int(attempt['attempt_id']);emp=str(attempt['employee_id'])
   recorded=details[details['attempt_id']==aid]
   observed={str(r['key']):str(r['status']) for _,r in recorded.iterrows()}
   n_pass=sum(v=='PASS' for v in observed.values());n_fail=sum(v=='FAIL' for v in observed.values())
   n_pending=sum(k not in observed for keys in STEPS.values() for k in keys)
-  with st.expander(f'PPE Attempt {number} · Employee ID {emp} · {attempt["status"]} · PASS {n_pass} / FAIL {n_fail} / PENDING {n_pending}',expanded=(aid==int(df.iloc[0]['internal_id']))):
-   rows=[]
-   for step,keys in STEPS.items():
-    for key in keys:
-     rows.append({'Checkpoint':f'Step {step}', 'Detected / inspection type':LABEL[key], 'Result':observed.get(key,'PENDING'), 'Data received':'YES' if key in observed else 'NO'})
+  with st.expander(f'Checkpoint {aid} · Employee {emp} · {attempt["status"]} · PASS {n_pass} / FAIL {n_fail} / PENDING {n_pending}'):
+   rows=[{'Step':step,'Check':LABEL[key],'Result':observed.get(key,'PENDING'),'Confirmed evidence': 'YES' if key in observed else 'NO'} for step,keys in STEPS.items() for key in keys]
    st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
-   st.caption('PASS/FAIL here refers to individual checks. Overall PENDING means some mandatory checks are still missing. Each valid PPE rectangle is one inspection attempt.')
- st.download_button('Download Audit CSV',df.drop(columns=['internal_id']).to_csv(index=False).encode('utf-8-sig'),'cogniser_original_flow_audit.csv','text/csv')
- st.subheader('Recent Incoming Events');st.caption('Events count inbound messages; a single PPE message can contain multiple independent PPE attempts.');st.dataframe(events,use_container_width=True,hide_index=True)
+ st.download_button('Download Audit CSV',df.to_csv(index=False).encode('utf-8-sig'),'cogniser_checkpoint_audit.csv','text/csv')
+ st.subheader('Recent Incoming Events')
+ st.caption('Events count inbound messages, not individual rectangles.')
+ st.dataframe(events,use_container_width=True,hide_index=True)
  with connect() as cloud_conn:
   exists=cloud_conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='cloud_evidence'").fetchone()
   if exists:
    cloud_df=pd.read_sql_query('SELECT event_time,event_type,employee_id,camera_id,accepted,payload FROM cloud_evidence ORDER BY event_time DESC',cloud_conn)
    st.subheader('Supabase Cloud Evidence · Face / PPE')
-   st.caption('Cloud mirror records are evidence only. Identity association and full 15-check inspection are NOT verified by this cloud mirror.')
+   st.caption('Cloud records are read-only evidence. Association and all mandatory checks require verification.')
    st.dataframe(cloud_df,use_container_width=True,hide_index=True)
    st.download_button('Download Cloud Evidence CSV',cloud_df.to_csv(index=False).encode('utf-8-sig'),'cogniser_cloud_evidence.csv','text/csv')
 
@@ -320,7 +281,7 @@ with tabs[9]:
  hardware_simulation()
 
 # Local-only data management. Never delete cloud evidence from an online dashboard.
-if not __import__('os').environ.get('COGNISER_ONLINE'):
+if not (__import__('os').environ.get('COGNISER_ONLINE') or __import__('os').environ.get('STREAMLIT_SHARING_MODE')):
  with st.sidebar.expander('DATA MANAGEMENT · LOCAL ONLY'):
   st.warning('This deletes local events and attempts only. Online Supabase records are NOT deleted. A backup is created first.')
   confirm=st.checkbox('I understand: delete all LOCAL inspection records',key='local_reset_confirm')
