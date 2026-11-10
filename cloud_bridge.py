@@ -71,7 +71,15 @@ def refresh_cloud():
             p=_dict(r.get('payload')); emp=r.get('employee_id'); camera=r.get('camera_id'); when=r.get('event_time') or ''
             accepted=_accepted(p.get('accepted'))
             c.execute('INSERT OR REPLACE INTO cloud_evidence VALUES(?,?,?,?,?,?,?)',(eid,when,typ,emp,camera,str(accepted),json.dumps(p,ensure_ascii=False)))
-            if typ not in ('face','ppe','manual_temperature','manual_inspection','cogniser_unknown'): continue
+            if typ not in ('face','ppe','manual_temperature','manual_inspection'):
+                # All unknown/new event types are retained as evidence, not decisions.
+                display = dict(p)
+                display.update({'employee_id':emp, 'equipmentId':camera, 'original_event_type':typ})
+                cur=c.execute('INSERT INTO events(time,event,payload,accepted,note) VALUES(?,?,?,?,?)',
+                              (when,'cogniser_unknown_raw',json.dumps(display,ensure_ascii=False),int(accepted),
+                               'Unverified event; no inspection decision'))
+                c.execute('INSERT INTO cloud_event_map VALUES(?,?)',(eid,cur.lastrowid))
+                continue
             display=dict(p); display.update({'employee_id':emp,'equipmentId':camera,'equipmentName':p.get('equipmentName') or camera,'accepted':accepted})
             if typ in ('manual_temperature','manual_inspection','cogniser_unknown'):
                 kind = {'manual_temperature':'manual_temperature', 'manual_inspection':'manual_inspection', 'cogniser_unknown':'cogniser_unknown_raw'}[typ]
@@ -123,6 +131,17 @@ def refresh_cloud():
                 verified = p.get('ppe_mapping_verified') is True
                 if matched and verified and p.get('alarm_only') is True and isinstance(failed, list):
                     allowed = {'gloves', 'hair_cover', 'face_mask', 'protective_clothing', 'shoes'}
+                    # Future vendor-confirmed PPE items may be enabled through Streamlit secrets.
+                    # Never accept arbitrary JSON item names as an automatic decision.
+                    try:
+                        import streamlit as st
+                        configured = st.secrets.get('COGNISER_VERIFIED_PPE_ITEMS')
+                        if isinstance(configured, (list, tuple)):
+                            allowed = {str(v) for v in configured} & {
+                                'ear_ring','necklace','bracelet','ring','nail','wound','plaster',
+                                'hair_cover','face_mask','protective_clothing','shoes','gloves','mobile_phone'}
+                    except (KeyError, TypeError, ValueError):
+                        pass
                     from core import recalculate
                     for item in sorted(set(failed) & allowed):
                         prior = c.execute('SELECT 1 FROM checks WHERE attempt_id=? AND key=?',
