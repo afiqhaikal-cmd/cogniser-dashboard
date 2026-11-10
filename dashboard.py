@@ -229,7 +229,7 @@ with tabs[7]:
   exists=cloud_conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='cloud_evidence'").fetchone()
   if exists:
    cloud_df=pd.read_sql_query('SELECT event_time,event_type,employee_id,camera_id,accepted,payload FROM cloud_evidence ORDER BY event_time DESC',cloud_conn)
-   st.subheader('Supabase Cloud Evidence · Face / PPE')
+   st.subheader('Supabase Cloud Evidence · Face / PPE / Manual / Other')
    st.caption('Cloud records are read-only evidence. Association and all mandatory checks require verification.')
    st.dataframe(cloud_df,use_container_width=True,hide_index=True)
    st.download_button('Download Cloud Evidence CSV',cloud_df.to_csv(index=False).encode('utf-8-sig'),'cogniser_cloud_evidence.csv','text/csv')
