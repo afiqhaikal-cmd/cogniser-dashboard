@@ -225,6 +225,122 @@ with tabs[7]:
  st.subheader('Recent Incoming Events')
  st.caption('Events count inbound messages, not individual rectangles.')
  st.dataframe(events,use_container_width=True,hide_index=True)
+ st.subheader('Gate V3 - 15 Mandatory Checks')
+ st.caption('SIMULATION / TEST ONLY - Not verified hardware inspections')
+   
+ import json as gate_json
+   
+ gate_rows = []
+ gate_details = []
+
+ # Gate V3: independent read-only Supabase simulation source.
+ from gate_v3_cloud_reader import fetch_gate_v3_snapshots
+
+ try:
+  gate_cloud_records = fetch_gate_v3_snapshots(
+   st.secrets["SUPABASE_URL"],
+   st.secrets["SUPABASE_SECRET_KEY"]
+  )
+  gate_cloud_df = pd.DataFrame(gate_cloud_records)
+ except Exception:
+  gate_cloud_df = pd.DataFrame()
+  st.warning(
+   "Gate V3 simulation cloud data unavailable. "
+   "No inspection status is inferred."
+  )
+
+ mandatory_keys = set(('temperature', 'ear_ring', 'necklace', 'bracelet', 'ring', 'nail', 'wound', 'plaster', 'hair_cover', 'face_mask', 'protective_clothing', 'shoes', 'hand_washing', 'gloves', 'mobile_phone'))
+
+ for _, record in gate_cloud_df.iterrows():
+     if str(record['event_type']) != 'gate_snapshot':
+         continue
+
+     try:
+         payload = record['payload']
+         if isinstance(payload, str):
+             payload = gate_json.loads(payload)
+
+         if not isinstance(payload, dict):
+             continue
+
+         if payload.get('test_only') is not True:
+             continue
+
+         checks = payload.get('checks')
+         if not isinstance(checks, list):
+             continue
+
+         valid = (
+             len(checks) == 15
+             and all(isinstance(c, dict) for c in checks)
+         )
+
+         if valid:
+             keys = [c.get('key') for c in checks]
+             statuses = [c.get('status') for c in checks]
+             valid = (
+                 len(set(keys)) == 15
+                 and set(keys) == mandatory_keys
+                 and all(s in ('PASS', 'FAIL', 'PENDING') for s in statuses)
+             )
+         else:
+             statuses = []
+
+         claimed = payload.get('overall_status')
+
+         if not valid:
+             status = 'UNVERIFIED'
+         elif 'FAIL' in statuses:
+             status = 'FAIL' if claimed == 'FAIL' else 'UNVERIFIED'
+         elif all(s == 'PASS' for s in statuses):
+             status = 'PASS' if claimed == 'PASS' else 'UNVERIFIED'
+         else:
+             status = 'PENDING' if claimed == 'PENDING' else 'UNVERIFIED'
+
+         employee = str(record['employee_id'])
+
+         failed = [
+             str(c.get('key'))
+             for c in checks
+             if isinstance(c, dict) and c.get('status') == 'FAIL'
+         ]
+
+         gate_rows.append({
+             'Employee': employee,
+             'Gate Status': status,
+             'Checks': f'{len(checks)}/15',
+             'Failed Item': ', '.join(failed) if failed else 'None',
+             'Record Type': 'TEST ONLY'
+         })
+
+         for check in checks:
+             if isinstance(check, dict):
+                 gate_details.append({
+                     'Employee': employee,
+                     'Check': check.get('key'),
+                     'Result': check.get('status'),
+                     'Evidence Source': check.get('source'),
+                     'Record Type': 'TEST ONLY'
+                 })
+
+     except (ValueError, TypeError, KeyError):
+         continue
+
+ if gate_rows:
+     st.dataframe(
+         pd.DataFrame(gate_rows),
+         use_container_width=True,
+         hide_index=True
+     )
+   
+     with st.expander('View all 15 Gate checks'):
+         st.dataframe(
+             pd.DataFrame(gate_details),
+             use_container_width=True,
+             hide_index=True
+         )
+ else:
+     st.info('No Gate V3 snapshots available.')
  with connect() as cloud_conn:
   exists=cloud_conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='cloud_evidence'").fetchone()
   if exists:
