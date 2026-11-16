@@ -11,10 +11,28 @@ from core import connect,snapshot,STEPS,LABEL,ORANGE,MANUAL
 import json
 STEP_NAMES=['Temperature + Jewellery / Nail / Wound / Plaster','Hair Cover / Mask / Clothing / Shoes','Hand Washing','Gloves','Mobile Phone / Metal Detection']
 st.set_page_config(page_title='FOOD SAFETY MONITORING-ISO22000',layout='wide',page_icon='🏭')
-st.markdown('''<style>.block-container{max-width:1450px;padding-top:1.4rem}.hero{background:linear-gradient(100deg,#092f50,#086b83);color:white;border-radius:18px;padding:26px}.hero h1{color:white;margin:0}.hero p{color:#d5edf4;margin:6px 0 0}.tile{border:1px solid #cbd5e1;border-radius:12px;padding:16px;min-height:145px;background:#f8fafc}.tag{font-size:12px;color:#64748b}.signal{width:110px;height:110px;border-radius:100%;margin:12px auto;border:6px solid white;box-shadow:0 0 24px #9ca3af}</style>''',unsafe_allow_html=True)
+st.markdown('''<style>.block-container{max-width:1450px;padding-top:1.4rem}.hero{background:linear-gradient(100deg,#092f50,#086b83);color:white;border-radius:18px;padding:26px}.hero h1{color:white;margin:0}.hero p{color:#d5edf4;margin:6px 0 0}.tile{color:#0f172a;border:1px solid #cbd5e1;border-radius:12px;padding:16px;min-height:145px;background:#f8fafc}.tile b,.tile p,.tile h2{color:#0f172a}.tag{font-size:12px;color:#64748b}.tile .tag{color:#475569}.signal{width:110px;height:110px;border-radius:100%;margin:12px auto;border:6px solid white;box-shadow:0 0 24px #9ca3af}</style>''',unsafe_allow_html=True)
 st.markdown('<div class="hero"><h1>FOOD SAFETY MONITORING-ISO22000</h1><p>Face Recognition → Step 1 → Step 2 → Step 3 → Step 4 → Step 5 → Gate Eligibility</p></div>',unsafe_allow_html=True)
-st.caption('DATA REFRESH · 5 SECONDS | Inspection status is based on recorded and verified events.')
+st.caption('ONLINE · Supabase read-only mirror of local records | Data may lag while sync is offline | TEST ONLY')
 s=snapshot();a=s['active'];last=s['latest'];current=a or last;state=(a['status'] if a else (last['status'] if last else 'WAITING'));color={'READY':'#ffffff','PASS':'#16a34a','FAIL':'#dc2626','WAITING':'#ffffff','PENDING':'#2563eb','INTERRUPTED':'#64748b'}.get(state,'#64748b')
+def latest_verified_session_ppe():
+ """Only display PPE tied to the current accepted face; never reuse an older employee's PPE."""
+ with connect() as c:
+  face=c.execute("SELECT id,payload FROM events WHERE event='cogniser_face_raw' AND accepted=1 ORDER BY id DESC LIMIT 1").fetchone()
+  if not face:
+   return None
+  fd=json.loads(face['payload'])
+  emp=str(fd.get('employee_id') or '')
+  camera=str(fd.get('equipmentId') or fd.get('equipmentName') or '')
+  candidates=c.execute("SELECT id,time,payload,note FROM events WHERE event='cogniser_ppe_raw' AND accepted=1 AND id>? ORDER BY id DESC",(face['id'],)).fetchall()
+  for item in candidates:
+   d=json.loads(item['payload'])
+   if (emp and camera and str(d.get('employee_id') or '')==emp
+       and str(d.get('equipmentId') or d.get('equipmentName') or '')==camera
+       and d.get('matching_status')=='MATCHED'):
+    return item
+ return None
+
 def latest_ppe_component_results():
  """Only show confirmed persisted checks for the current checkpoint."""
  snap=snapshot()
@@ -37,7 +55,7 @@ def virtual_hardware_status():
  active=snap['active']; last=snap['latest']
  with connect() as c:
   face=c.execute("SELECT id FROM events WHERE event='cogniser_face_raw' AND accepted=1 ORDER BY id DESC LIMIT 1").fetchone()
-  count=c.execute("SELECT COUNT(*) FROM attempts WHERE face_session_id=? AND source='COGNISER_CHECKPOINT'",(face['id'],)).fetchone()[0] if face else 0
+  count=c.execute("SELECT COUNT(*) FROM attempts WHERE face_session_id=? AND source IN ('COGNISER_CHECKPOINT','CLOUD_FACE_CHECKPOINT')",(face['id'],)).fetchone()[0] if face else 0
  if active:
   return ('PROCESSING','BLUE','Pemeriksaan sedang dijalankan.',count)
  if last and last['status']=='PASS':
@@ -87,7 +105,7 @@ def live_overview():
    face_row_id=c.execute("SELECT payload FROM events WHERE event='cogniser_face_raw' AND accepted=1 ORDER BY id DESC LIMIT 1").fetchone()
    face_employee=json.loads(face_row_id['payload']).get('employee_id','—') if face_row_id else '—'
    face_session=c.execute("SELECT id FROM events WHERE event='cogniser_face_raw' AND accepted=1 ORDER BY id DESC LIMIT 1").fetchone()
-   ppe_count=c.execute("SELECT COUNT(*) FROM attempts WHERE face_session_id=? AND source='COGNISER_CHECKPOINT'",(face_session['id'],)).fetchone()[0] if face_session else 0
+   ppe_count=c.execute("SELECT COUNT(*) FROM attempts WHERE face_session_id=? AND source IN ('COGNISER_CHECKPOINT','CLOUD_FACE_CHECKPOINT')",(face_session['id'],)).fetchone()[0] if face_session else 0
   x,y,z=st.columns(3);x.metric('Employee ID',face_employee);y.metric('Current Step',str(a['stage'])+'/5' if a and face_session and a['face_session_id']==face_session['id'] else '—');z.metric('Checkpoint sessions (current face)',ppe_count)
   st.info('One accepted face event creates one checkpoint session. PPE rectangles are evidence within that session, not separate attempts. Overall PENDING means required checks remain unverified.')
  st.subheader('Original Factory Flow')
@@ -124,7 +142,7 @@ def live_overview():
  st.divider()
  st.subheader('Live Cogniser PPE Detection · Shared Camera')
  with connect() as c:
-  raw=c.execute("SELECT time,payload FROM events WHERE event='cogniser_ppe_raw' ORDER BY id DESC LIMIT 1").fetchone()
+  raw=latest_verified_session_ppe()
  if raw:
   data=json.loads(raw['payload']);rects=data.get('rectList',[])
   a1,a2,a3=st.columns(3)
@@ -135,7 +153,7 @@ def live_overview():
   if rects:
    st.dataframe(pd.DataFrame([{'Object ID':r.get('id'),'Cogniser raw value':r.get('value'),'Employee ID (sequence)':data.get('employee_id') or '—'} for r in rects]),use_container_width=True,hide_index=True)
   st.info(f'Latest PPE message: {len(rects)} rectangles. Rectangles are observations, not separate employee attempts. Device bit mapping requires vendor confirmation.')
- else:st.info('Awaiting PPE Detection event.')
+ else:st.info('PENDING — No verified PPE message matched to the current accepted Face Recognition session. Older PPE records are excluded.')
  st.caption('Refresh interval: 5 seconds | Access-control output: Not configured')
 
 
@@ -154,7 +172,7 @@ def cogniser_checkpoint_live(step):
  st.subheader('Live Cogniser evidence · automatic refresh (5 seconds)')
  with connect() as c:
   face=c.execute("SELECT id,time,payload,accepted,note FROM events WHERE event='cogniser_face_raw' ORDER BY id DESC LIMIT 1").fetchone()
-  ppe=c.execute("SELECT time,payload,note FROM events WHERE event='cogniser_ppe_raw' ORDER BY id DESC LIMIT 1").fetchone()
+  ppe=latest_verified_session_ppe()
  if step==0:
   if not face:st.info('No Face Recognition event received.');return
   d=json.loads(face['payload']);x,y,z=st.columns(3)
@@ -162,13 +180,13 @@ def cogniser_checkpoint_live(step):
   st.caption(f"Received: {face['time']} · Library: {d.get('faceLibName')} · Session accepted: {d.get('accepted')}")
   st.warning('Identity acceptance threshold pending device validation.')
  elif step in (2,4):
-  if not ppe:st.info('No PPE Detection event received.');return
+  if not ppe:st.info('PENDING — No verified PPE evidence for the current Face Recognition session.');return
   d=json.loads(ppe['payload']);rows=d.get('rectList') or []
   with connect() as c:
    face_row_id=c.execute("SELECT payload FROM events WHERE event='cogniser_face_raw' AND accepted=1 ORDER BY id DESC LIMIT 1").fetchone()
    face_employee=json.loads(face_row_id['payload']).get('employee_id','—') if face_row_id else '—'
    face_session=c.execute("SELECT id FROM events WHERE event='cogniser_face_raw' AND accepted=1 ORDER BY id DESC LIMIT 1").fetchone()
-   ppe_count=c.execute("SELECT COUNT(*) FROM attempts WHERE face_session_id=? AND source='COGNISER_CHECKPOINT'",(face_session['id'],)).fetchone()[0] if face_session else 0
+   ppe_count=c.execute("SELECT COUNT(*) FROM attempts WHERE face_session_id=? AND source IN ('COGNISER_CHECKPOINT','CLOUD_FACE_CHECKPOINT')",(face_session['id'],)).fetchone()[0] if face_session else 0
   x,y,z=st.columns(3);x.metric('Camera',d.get('equipmentId') or d.get('equipmentName') or '—');y.metric('PPE alarm rectangles',len([r for r in rows if len(str(r.get('value','')).split('-'))==3 and all(v in ('0','1') for v in str(r.get('value','')).split('-'))]));z.metric('Linked employee',d.get('employee_id') or '—')
   st.caption(f"Received: {ppe['time']} · {d.get('taskName','')} · Source event stored")
   show_decoded_ppe(d, ('Face Mask','Hair Cover') if step==2 else ('Gloves',))
