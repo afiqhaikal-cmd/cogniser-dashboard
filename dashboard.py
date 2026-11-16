@@ -37,7 +37,7 @@ def virtual_hardware_status():
  active=snap['active']; last=snap['latest']
  with connect() as c:
   face=c.execute("SELECT id FROM events WHERE event='cogniser_face_raw' AND accepted=1 ORDER BY id DESC LIMIT 1").fetchone()
-  count=c.execute("SELECT COUNT(*) FROM attempts WHERE face_session_id=? AND source='CLOUD_FACE_CHECKPOINT'",(face['id'],)).fetchone()[0] if face else 0
+  count=c.execute("SELECT COUNT(*) FROM attempts WHERE face_session_id=? AND source='COGNISER_CHECKPOINT'",(face['id'],)).fetchone()[0] if face else 0
  if active:
   return ('PROCESSING','BLUE','Pemeriksaan sedang dijalankan.',count)
  if last and last['status']=='PASS':
@@ -87,7 +87,7 @@ def live_overview():
    face_row_id=c.execute("SELECT payload FROM events WHERE event='cogniser_face_raw' AND accepted=1 ORDER BY id DESC LIMIT 1").fetchone()
    face_employee=json.loads(face_row_id['payload']).get('employee_id','—') if face_row_id else '—'
    face_session=c.execute("SELECT id FROM events WHERE event='cogniser_face_raw' AND accepted=1 ORDER BY id DESC LIMIT 1").fetchone()
-   ppe_count=c.execute("SELECT COUNT(*) FROM attempts WHERE face_session_id=? AND source='CLOUD_FACE_CHECKPOINT'",(face_session['id'],)).fetchone()[0] if face_session else 0
+   ppe_count=c.execute("SELECT COUNT(*) FROM attempts WHERE face_session_id=? AND source='COGNISER_CHECKPOINT'",(face_session['id'],)).fetchone()[0] if face_session else 0
   x,y,z=st.columns(3);x.metric('Employee ID',face_employee);y.metric('Current Step',str(a['stage'])+'/5' if a and face_session and a['face_session_id']==face_session['id'] else '—');z.metric('Checkpoint sessions (current face)',ppe_count)
   st.info('One accepted face event creates one checkpoint session. PPE rectangles are evidence within that session, not separate attempts. Overall PENDING means required checks remain unverified.')
  st.subheader('Original Factory Flow')
@@ -168,7 +168,7 @@ def cogniser_checkpoint_live(step):
    face_row_id=c.execute("SELECT payload FROM events WHERE event='cogniser_face_raw' AND accepted=1 ORDER BY id DESC LIMIT 1").fetchone()
    face_employee=json.loads(face_row_id['payload']).get('employee_id','—') if face_row_id else '—'
    face_session=c.execute("SELECT id FROM events WHERE event='cogniser_face_raw' AND accepted=1 ORDER BY id DESC LIMIT 1").fetchone()
-   ppe_count=c.execute("SELECT COUNT(*) FROM attempts WHERE face_session_id=? AND source='CLOUD_FACE_CHECKPOINT'",(face_session['id'],)).fetchone()[0] if face_session else 0
+   ppe_count=c.execute("SELECT COUNT(*) FROM attempts WHERE face_session_id=? AND source='COGNISER_CHECKPOINT'",(face_session['id'],)).fetchone()[0] if face_session else 0
   x,y,z=st.columns(3);x.metric('Camera',d.get('equipmentId') or d.get('equipmentName') or '—');y.metric('PPE alarm rectangles',len([r for r in rows if len(str(r.get('value','')).split('-'))==3 and all(v in ('0','1') for v in str(r.get('value','')).split('-'))]));z.metric('Linked employee',d.get('employee_id') or '—')
   st.caption(f"Received: {ppe['time']} · {d.get('taskName','')} · Source event stored")
   show_decoded_ppe(d, ('Face Mask','Hair Cover') if step==2 else ('Gloves',))
@@ -233,21 +233,22 @@ with tabs[7]:
  gate_rows = []
  gate_details = []
 
- # Gate V3: independent read-only Supabase simulation source.
+  # Hosted dashboard: Gate V3 reads Supabase only; never the laptop SQLite.
  from gate_v3_cloud_reader import fetch_gate_v3_snapshots
-
+ gate_cloud_records = []
+ st.caption("ONLINE · Supabase Gate V3 evidence (read-only)")
  try:
   gate_cloud_records = fetch_gate_v3_snapshots(
    st.secrets["SUPABASE_URL"],
    st.secrets["SUPABASE_SECRET_KEY"]
   )
-  gate_cloud_df = pd.DataFrame(gate_cloud_records)
- except Exception:
-  gate_cloud_df = pd.DataFrame()
-  st.warning(
-   "Gate V3 simulation cloud data unavailable. "
-   "No inspection status is inferred."
-  )
+ except Exception as exc:
+  st.warning("Gate V3 cloud evidence unavailable; no inspection result inferred. " + type(exc).__name__)
+
+ gate_cloud_df = pd.DataFrame(
+  gate_cloud_records,
+  columns=["event_type", "employee_id", "payload"]
+ )
 
  mandatory_keys = set(('temperature', 'ear_ring', 'necklace', 'bracelet', 'ring', 'nail', 'wound', 'plaster', 'hair_cover', 'face_mask', 'protective_clothing', 'shoes', 'hand_washing', 'gloves', 'mobile_phone'))
 
@@ -365,7 +366,7 @@ with tabs[7]:
  st.warning('Inspection records support internal food safety monitoring; certification status and physical access control are managed separately.')
 with tabs[8]:
  st.header('Cogniser Data Interface · Connection Status')
- st.success('FastAPI receiver: POST /api/cogniser/face, /api/cogniser/ppe, and confirmed /api/events/...')
+ st.info('FastAPI receiver runs on the local Cogniser PC, not on Streamlit Cloud. Device integration remains unverified.')
  st.code('POST /api/events/temperature\n{"value":36.7,"source":"THERMAL_SENSOR"}\n\nPOST /api/events/check\n{"key":"hair_cover","result":"PASS","source":"COGNISER"}',language='http')
  st.code('POST http://MINI_PC_IP:8022/api/cogniser/ppe\nGET http://MINI_PC_IP:8022/api/cogniser/ppe/latest',language='http')
  st.write('Integration status: Device interface verification pending.')
@@ -413,8 +414,4 @@ if not (__import__('os').environ.get('COGNISER_ONLINE') or __import__('os').envi
   st.warning('This deletes local events and attempts only. Online Supabase records are NOT deleted. A backup is created first.')
   confirm=st.checkbox('I understand: delete all LOCAL inspection records',key='local_reset_confirm')
   if st.button('DELETE ALL LOCAL DATA',disabled=not confirm,type='secondary'):
-   from local_admin import reset_local
-   try:
-    st.success(reset_local())
-    st.rerun()
-   except Exception as exc: st.error(f'Reset failed; no claim of success: {exc}')
+   st.error('Local data reset is disabled until backup and authorization controls are verified.')
