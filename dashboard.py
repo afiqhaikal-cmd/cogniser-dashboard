@@ -91,70 +91,65 @@ def hardware_simulation():
 tabs=st.tabs(['LIVE OVERVIEW','FACE RECOGNITION','STEP 1 · TEMPERATURE + HYGIENE','STEP 2 · PPE','STEP 3 · HAND WASHING','STEP 4 · GLOVES','STEP 5 · METAL DETECTION','AUDIT & REPORT','COGNISER CONNECTION','4-COLOUR INDICATOR + AUDIO'])
 @st.fragment(run_every="5s")
 def live_overview():
- s=snapshot();a=s['active'];last=s['latest'];current=a or last
- state=(a['status'] if a else (last['status'] if last else 'WAITING'))
- color={'READY':'#ffffff','PASS':'#16a34a','FAIL':'#dc2626','WAITING':'#ffffff','PENDING':'#2563eb','INTERRUPTED':'#64748b'}.get(state,'#64748b')
- passed={c['key']:c['status'] for c in s['checks']}
+ """Authoritative TEST Gate V3 snapshot, not the legacy SQLite mirror."""
+ from gate_v3_cloud_reader import fetch_gate_v3_snapshots
+ required = {key for keys in STEPS.values() for key in keys}
+ record = None
+ error = None
+ try:
+  records = fetch_gate_v3_snapshots(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_SECRET_KEY"])
+  for row in records:
+   payload = row.get('payload') or {}
+   if isinstance(payload, str):
+    payload = json.loads(payload)
+   if not isinstance(payload, dict) or payload.get('test_only') is not True:
+    continue
+   checks = payload.get('checks')
+   if not isinstance(checks, list) or len(checks) != 15 or not all(isinstance(c, dict) for c in checks):
+    continue
+   keys = [c.get('key') for c in checks]
+   statuses = [c.get('status') for c in checks]
+   if len(set(keys)) != 15 or set(keys) != required or not all(v in ('PASS','FAIL','PENDING') for v in statuses):
+    continue
+   calculated = 'FAIL' if 'FAIL' in statuses else ('PASS' if all(v == 'PASS' for v in statuses) else 'PENDING')
+   if payload.get('overall_status') != calculated:
+    continue
+   record = {'employee': str(row.get('employee_id') or payload.get('employee_id') or '—'),
+             'status': calculated, 'checks': checks, 'attempt': payload.get('attempt_id')}
+   break
+ except Exception as exc:
+  error = type(exc).__name__
 
- left,right=st.columns([1,3],gap='large')
+ state = record['status'] if record else 'UNAVAILABLE'
+ color = {'PASS':'#16a34a','FAIL':'#dc2626','PENDING':'#2563eb','UNAVAILABLE':'#64748b'}[state]
+ left,right = st.columns([1,3], gap='large')
  with left:
-  st.markdown(f'<div class="tile" style="text-align:center"><div class="signal" style="background:{color};box-shadow:0 0 26px {color}66"></div><h2>{state}</h2><p>Legacy inspection state · see 4-colour tab</p><span class="tag">Lamp/speaker/gate not physically connected</span></div>',unsafe_allow_html=True)
+  st.markdown(f'<div class="tile" style="text-align:center"><div class="signal" style="background:{color};box-shadow:0 0 26px {color}66"></div><h2>{state}</h2><p>Verified Gate V3 snapshot · TEST ONLY</p><span class="tag">No physical gate/lamp/speaker control</span></div>', unsafe_allow_html=True)
  with right:
-  st.subheader('Live Employee Inspection')
-  with connect() as c:
-   face_row_id=c.execute("SELECT payload FROM events WHERE event='cogniser_face_raw' AND accepted=1 ORDER BY id DESC LIMIT 1").fetchone()
-   face_employee=json.loads(face_row_id['payload']).get('employee_id','—') if face_row_id else '—'
-   face_session=c.execute("SELECT id FROM events WHERE event='cogniser_face_raw' AND accepted=1 ORDER BY id DESC LIMIT 1").fetchone()
-   ppe_count=c.execute("SELECT COUNT(*) FROM attempts WHERE face_session_id=? AND source IN ('COGNISER_CHECKPOINT','CLOUD_FACE_CHECKPOINT')",(face_session['id'],)).fetchone()[0] if face_session else 0
-  x,y,z=st.columns(3);x.metric('Employee ID',face_employee);y.metric('Current Step',str(a['stage'])+'/5' if a and face_session and a['face_session_id']==face_session['id'] else '—');z.metric('Checkpoint sessions (current face)',ppe_count)
-  st.info('One accepted face event creates one checkpoint session. PPE rectangles are evidence within that session, not separate attempts. Overall PENDING means required checks remain unverified.')
+  st.subheader('Live Employee Inspection · Supabase Gate V3')
+  x,y,z = st.columns(3)
+  x.metric('Employee ID', record['employee'] if record else '—')
+  y.metric('Current Step', '—')
+  z.metric('Gate snapshot attempt', str(record['attempt']) if record and record['attempt'] is not None else '—')
+  st.caption('Completed Gate V3 snapshot is not an active five-step session. Current Step is not inferred.')
+ if error:
+  st.error('Supabase Gate V3 unavailable: ' + error)
+ elif not record:
+  st.warning('No valid TEST Gate V3 snapshot available. No status inferred from SQLite.')
  st.subheader('Original Factory Flow')
- columns=st.columns(5)
- for i,col in enumerate(columns,1):
-  with col:st.markdown(f'<div class="tile"><b>STEP {i}</b><p>{STEP_NAMES[i-1]}</p><span class="tag">{len(STEPS[i])} checks</span></div>',unsafe_allow_html=True)
- st.subheader('Current Checkpoint Evidence')
- passed={c['key']:c['status'] for c in s['checks']}
- latest_observations=latest_ppe_component_results()
+ cols = st.columns(5)
+ for i,col in enumerate(cols,1):
+  with col:
+   st.markdown(f'<div class="tile"><b>STEP {i}</b><p>{STEP_NAMES[i-1]}</p><span class="tag">{len(STEPS[i])} checks</span></div>', unsafe_allow_html=True)
+ st.subheader('Current Checkpoint Evidence · Supabase Gate V3')
+ observed = {c['key']: c['status'] for c in record['checks']} if record else {}
  for i in range(1,6):
-  with st.expander(f'Step {i} · {STEP_NAMES[i-1]}',expanded=bool(a and a['stage']==i)):
-   for k in STEPS[i]:
-    observed=passed.get(k)
-    if k in ('gloves','face_mask','hair_cover') and k in latest_observations:
-     observed=latest_observations[k]+' · latest Cogniser PPE evidence'
-    st.write(f'**{LABEL[k]}** — {observed or "PENDING · no confirmed sensor/operator result"}')
+  with st.expander(f'Step {i} · {STEP_NAMES[i-1]}', expanded=bool(record and i==4 and observed.get('gloves')=='FAIL')):
+   for key in STEPS[i]:
+    st.write(f'**{LABEL[key]}** — {observed.get(key, "UNAVAILABLE")}')
  st.divider()
- st.subheader('Live Cogniser Face Recognition · Shared Camera')
- with connect() as c:
-  face_row=c.execute("SELECT id,time,payload,accepted,note FROM events WHERE event='cogniser_face_raw' ORDER BY id DESC LIMIT 1").fetchone()
- if face_row:
-  face_data=json.loads(face_row['payload'])
-  f1,f2,f3,f4=st.columns(4)
-  f1.metric('Employee ID',face_data.get('employee_id','—'))
-  f2.metric('Camera',face_data.get('equipmentId') or face_data.get('equipmentName') or '—')
-  f3.metric('Match score',str(face_data.get('score','—')))
-  
-  with connect() as session_conn:
-   session_exists=bool(session_conn.execute('SELECT 1 FROM attempts WHERE face_session_id=? LIMIT 1',(face_row['id'],)).fetchone())
-  f4.metric('Session created','YES' if face_row['accepted'] and session_exists else 'NO')
-  st.caption(f"Received at {malaysia_time(face_row['time'])} (Malaysia time) · Library: {face_data.get('faceLibName','—')} · {face_row['note']}")
-  st.info('Face matching threshold pending validation. Device thermal metadata is not treated as body temperature.')
- else:st.info('Awaiting Face Recognition event.')
- st.divider()
- st.subheader('Live Cogniser PPE Detection · Shared Camera')
- with connect() as c:
-  raw=latest_verified_session_ppe()
- if raw:
-  data=json.loads(raw['payload']);rects=data.get('rectList',[])
-  a1,a2,a3=st.columns(3)
-  a1.metric('Camera',data.get('equipmentId') or data.get('equipmentName') or '—')
-  a2.metric('PPE alarm rectangles',len([r for r in rects if len(str(r.get('value','')).split('-'))==3 and all(v in ('0','1') for v in str(r.get('value','')).split('-'))]))
-  a3.metric('Linked employee',data.get('employee_id') or '—')
-  st.caption(f"Received at {malaysia_time(raw['time'])} (Malaysia time) · Task: {data.get('taskName','—')}")
-  if rects:
-   st.dataframe(pd.DataFrame([{'Object ID':r.get('id'),'Cogniser raw value':r.get('value'),'Employee ID (sequence)':data.get('employee_id') or '—'} for r in rects]),use_container_width=True,hide_index=True)
-  st.info(f'Latest PPE message: {len(rects)} rectangles. Rectangles are observations, not separate employee attempts. Device bit mapping requires vendor confirmation.')
- else:st.info('PENDING — No verified PPE message matched to the current accepted Face Recognition session. Older PPE records are excluded.')
- st.caption('Refresh interval: 5 seconds | Access-control output: Not configured')
+ st.info('Face Recognition and raw PPE events are legacy cloud-mirror diagnostics, not evidence for the Gate V3 result above. View their separate tabs for diagnostic data.')
+ st.caption('Supabase read-only · SIMULATION / TEST ONLY · physical device verification pending')
 
 
 def show_decoded_ppe(data, component=None):
